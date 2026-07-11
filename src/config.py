@@ -6,116 +6,107 @@ Uses certain default values for parameters if not specified via the .env file.
 """
 
 import os
+from dataclasses import dataclass
 from dotenv import load_dotenv
-from typing import cast
+from typing import Optional, Tuple, cast
 
 
+@dataclass
 class Config:
-    MODEL_NAME: str = (
-        "microsoft/resnet-50"  # Name of the model to be used for inference.
-        # Must be resnet-50 or mobilenet-v2 for this implementation.
-        # Other models may require additional modifications to the code.
-    )
-    MODEL_PATH: str | None = (
-        None  # Models path to be used for inference. If None, the model will be downloaded from the Hugging Face Hub.
-    )
-    INFERENCE_DEVICE: str = (
-        "cuda"  # Device to be used for inference (e.g., "cpu" or "cuda")
-    )
-    API_HOST: str = "0.0.0.0"  # Host URL for the API endpoint
-    API_KEY: str | None = None  # API key for authentication (if required)
-    API_PORT: int = 8000  # Port number for the API endpoint
-    API_VERSION: str = "1.0.0"  # Version of the API
-    DEBUG: bool = False  # Enable or disable debug mode for the API
-    TIMEOUT: int = 30  # Default timeout for API requests in seconds
-    MAX_CONTENT_LENGTH: int = (
-        16 * 1024 * 1024
-    )  # Default maximum content length for API requests in bytes (16 MB)
-    LOG_LEVEL: str = (
-        "INFO"  # Default log level for the API (e.g., "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-    )
-    LOG_FORMAT: str = "json"  # Default log format for the API (e.g., "json", "text")
-    MAX_FILE_SIZE_MB: int = 16  # Maximum file size for uploaded files in MB
-    MAX_IMAGE_DIMENSIONS: tuple[int, int] = (
-        4096,
-        4096,
-    )  # Maximum dimensions for uploaded images (width, height)
-    MODEL_INPUT_SHAPE: tuple[int | None, int, int, int] = (
-        None,
-        3,
-        224,
-        224,
-    )  # Default input shape for the model (batch, channels, height, width)
-    TOP_K_PREDICTIONS: int = (
-        5  # Number of top predictions to return from the model inference
-    )
-    MAX_TOP_K_PREDICTIONS: int = (
-        10  # Maximum number of top predictions allowed for the model inference
-    )
+    MODEL_NAME: str = "microsoft/resnet-50"
+    MODEL_PATH: Optional[str] = None
+    INFERENCE_DEVICE: str = "cuda"
+    API_HOST: str = "0.0.0.0"
+    API_KEY: Optional[str] = None
+    API_PORT: int = 8000
+    API_VERSION: str = "1.0.0"
+    DEBUG: bool = False
+    TIMEOUT: int = 30
+    MAX_CONTENT_LENGTH: int = 16 * 1024 * 1024
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"
+    MAX_FILE_SIZE_MB: int = 16
+    MAX_IMAGE_DIMENSIONS: Tuple[int, int] = (4096, 4096)
+    MODEL_INPUT_SHAPE: Tuple[Optional[int], int, int, int] = (None, 3, 224, 224)
+    TOP_K_PREDICTIONS: int = 5
+    MAX_TOP_K_PREDICTIONS: int = 10
 
-    def __init__(self):
-        """
-        Initialize the configuration by loading environment variables and reading the .env file if available.
-        Validate Configuration parameters and set default values for any missing parameters.
-        Log the configuration settings for debugging and monitoring purposes.
-        Priority is given to environment variables over .env file values, and .env file values over default values.
-        """
-        load_dotenv(
-            ".env.shared"
-        )  # Load environment variables from .env.shared file if available
-        load_dotenv(".env")  # Load environment variables from .env file if available
+    @classmethod
+    def from_env(cls) -> "Config":
+        """Create a Config instance from environment variables and .env files."""
+        load_dotenv(".env.shared")
+        load_dotenv(".env")
 
-        # Attempt to read configuration parameters from environment variables, falling back to default values if not set
-        self.MODEL_NAME = os.getenv("MODEL_NAME", self.MODEL_NAME)
-        self.MODEL_PATH = os.getenv("MODEL_PATH", self.MODEL_PATH)
-        self.INFERENCE_DEVICE = os.getenv("INFERENCE_DEVICE", self.INFERENCE_DEVICE)
-        self.API_HOST = os.getenv("API_HOST", self.API_HOST)
-        self.API_KEY = os.getenv("API_KEY", self.API_KEY)
-        self.API_PORT = int(os.getenv("API_PORT", self.API_PORT))
-        self.API_VERSION = os.getenv("API_VERSION", self.API_VERSION)
-        self.DEBUG = os.getenv("DEBUG", str(self.DEBUG)).lower() in ("true", "1", "yes")
-        self.TIMEOUT = int(os.getenv("TIMEOUT", self.TIMEOUT))
-        self.MAX_CONTENT_LENGTH = int(
-            os.getenv("MAX_CONTENT_LENGTH", self.MAX_CONTENT_LENGTH)
+        model_name = os.getenv("MODEL_NAME", cls.MODEL_NAME)
+        model_path = os.getenv("MODEL_PATH", cls.MODEL_PATH)
+        inference_device = os.getenv("INFERENCE_DEVICE", cls.INFERENCE_DEVICE)
+        api_host = os.getenv("API_HOST", cls.API_HOST)
+        api_key = os.getenv("API_KEY", cls.API_KEY)
+        api_port = int(os.getenv("API_PORT", cls.API_PORT))
+        api_version = os.getenv("API_VERSION", cls.API_VERSION)
+        debug = os.getenv("DEBUG", str(cls.DEBUG)).lower() in ("true", "1", "yes")
+        timeout = int(os.getenv("TIMEOUT", cls.TIMEOUT))
+        max_content_length = int(
+            os.getenv("MAX_CONTENT_LENGTH", cls.MAX_CONTENT_LENGTH)
         )
-        self.LOG_LEVEL = os.getenv("LOG_LEVEL", self.LOG_LEVEL)
-        self.LOG_FORMAT = os.getenv("LOG_FORMAT", self.LOG_FORMAT)
-        self.MAX_FILE_SIZE_MB = int(
-            os.getenv("MAX_FILE_SIZE_MB", self.MAX_FILE_SIZE_MB)
-        )
-        self.MAX_IMAGE_DIMENSIONS = cast(
-            tuple[int, int],
-            tuple(
-                int(x)
-                for x in os.getenv(
-                    "MAX_IMAGE_DIMENSIONS",
-                    f"{self.MAX_IMAGE_DIMENSIONS[0]},{self.MAX_IMAGE_DIMENSIONS[1]}",
-                ).split(",")
+        log_level = os.getenv("LOG_LEVEL", cls.LOG_LEVEL)
+        log_format = os.getenv("LOG_FORMAT", cls.LOG_FORMAT)
+        max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", cls.MAX_FILE_SIZE_MB))
+        max_image_dimensions = cast(
+            Tuple[int, int],
+            (
+                tuple(
+                    int(x)
+                    for x in os.getenv(
+                        "MAX_IMAGE_DIMENSIONS",
+                        f"{cls.MAX_IMAGE_DIMENSIONS[0]},{cls.MAX_IMAGE_DIMENSIONS[1]}",
+                    ).split(",")
+                )
             ),
         )
-        self.MODEL_INPUT_SHAPE = cast(
-            tuple[int | None, int, int, int],
-            tuple(
-                int(x) if x != "None" else None
-                for x in os.getenv(
-                    "MODEL_INPUT_SHAPE",
-                    f"{self.MODEL_INPUT_SHAPE[0]},{self.MODEL_INPUT_SHAPE[1]},{self.MODEL_INPUT_SHAPE[2]},{self.MODEL_INPUT_SHAPE[3]}",
-                ).split(",")
+        model_input_shape = cast(
+            Tuple[Optional[int], int, int, int],
+            (
+                tuple(
+                    int(x) if x != "None" else None
+                    for x in os.getenv(
+                        "MODEL_INPUT_SHAPE",
+                        f"{cls.MODEL_INPUT_SHAPE[0]},{cls.MODEL_INPUT_SHAPE[1]},{cls.MODEL_INPUT_SHAPE[2]},{cls.MODEL_INPUT_SHAPE[3]}",
+                    ).split(",")
+                )
             ),
         )
-        self.TOP_K_PREDICTIONS = int(
-            os.getenv("TOP_K_PREDICTIONS", self.TOP_K_PREDICTIONS)
+        top_k_predictions = int(os.getenv("TOP_K_PREDICTIONS", cls.TOP_K_PREDICTIONS))
+        max_top_k_predictions = int(
+            os.getenv("MAX_TOP_K_PREDICTIONS", cls.MAX_TOP_K_PREDICTIONS)
         )
-        self.MAX_TOP_K_PREDICTIONS = int(
-            os.getenv("MAX_TOP_K_PREDICTIONS", self.MAX_TOP_K_PREDICTIONS)
+
+        config = cls(
+            MODEL_NAME=model_name,
+            MODEL_PATH=model_path,
+            INFERENCE_DEVICE=inference_device,
+            API_HOST=api_host,
+            API_KEY=api_key,
+            API_PORT=api_port,
+            API_VERSION=api_version,
+            DEBUG=debug,
+            TIMEOUT=timeout,
+            MAX_CONTENT_LENGTH=max_content_length,
+            LOG_LEVEL=log_level,
+            LOG_FORMAT=log_format,
+            MAX_FILE_SIZE_MB=max_file_size_mb,
+            MAX_IMAGE_DIMENSIONS=max_image_dimensions,
+            MODEL_INPUT_SHAPE=model_input_shape,
+            TOP_K_PREDICTIONS=top_k_predictions,
+            MAX_TOP_K_PREDICTIONS=max_top_k_predictions,
         )
+
+        cls.validate(config)
+        return config
 
     @classmethod
     def validate(cls, config: "Config") -> None:
-        """
-        Validate the configuration parameters to ensure they meet the required criteria.
-        Raise ValueError if any parameter is invalid or out of acceptable range.
-        """
+        """Validate the configuration parameters and raise ValueError for invalid values."""
         if (
             not isinstance(config.MODEL_NAME, str)
             or not config.MODEL_NAME
@@ -170,34 +161,28 @@ class Config:
                 "MAX_TOP_K_PREDICTIONS must be a positive integer less than or equal to 100."
             )
 
-    @classmethod
-    def to_dict(cls, config: "Config") -> dict:
-        """
-        Convert the configuration parameters to a dictionary for easy access and manipulation.
-        Returns a dictionary representation of the configuration parameters.
-        """
+    def to_dict(self) -> dict:
+        """Convert the configuration parameters to a dictionary for easy access and manipulation."""
         return {
-            "MODEL_NAME": config.MODEL_NAME,
-            "MODEL_PATH": config.MODEL_PATH,
-            "INFERENCE_DEVICE": config.INFERENCE_DEVICE,
-            "API_HOST": config.API_HOST,
-            "API_KEY": config.API_KEY,
-            "API_PORT": config.API_PORT,
-            "API_VERSION": config.API_VERSION,
-            "DEBUG": config.DEBUG,
-            "TIMEOUT": config.TIMEOUT,
-            "MAX_CONTENT_LENGTH": config.MAX_CONTENT_LENGTH,
-            "LOG_LEVEL": config.LOG_LEVEL,
-            "LOG_FORMAT": config.LOG_FORMAT,
-            "MAX_FILE_SIZE_MB": config.MAX_FILE_SIZE_MB,
-            "MAX_IMAGE_DIMENSIONS": config.MAX_IMAGE_DIMENSIONS,
-            "MODEL_INPUT_SHAPE": config.MODEL_INPUT_SHAPE,
-            "TOP_K_PREDICTIONS": config.TOP_K_PREDICTIONS,
-            "MAX_TOP_K_PREDICTIONS": config.MAX_TOP_K_PREDICTIONS,
+            "MODEL_NAME": self.MODEL_NAME,
+            "MODEL_PATH": self.MODEL_PATH,
+            "INFERENCE_DEVICE": self.INFERENCE_DEVICE,
+            "API_HOST": self.API_HOST,
+            "API_KEY": self.API_KEY,
+            "API_PORT": self.API_PORT,
+            "API_VERSION": self.API_VERSION,
+            "DEBUG": self.DEBUG,
+            "TIMEOUT": self.TIMEOUT,
+            "MAX_CONTENT_LENGTH": self.MAX_CONTENT_LENGTH,
+            "LOG_LEVEL": self.LOG_LEVEL,
+            "LOG_FORMAT": self.LOG_FORMAT,
+            "MAX_FILE_SIZE_MB": self.MAX_FILE_SIZE_MB,
+            "MAX_IMAGE_DIMENSIONS": self.MAX_IMAGE_DIMENSIONS,
+            "MODEL_INPUT_SHAPE": self.MODEL_INPUT_SHAPE,
+            "TOP_K_PREDICTIONS": self.TOP_K_PREDICTIONS,
+            "MAX_TOP_K_PREDICTIONS": self.MAX_TOP_K_PREDICTIONS,
         }
 
     def __str__(self) -> str:
-        """
-        Return a string representation of the configuration parameters for easy logging and debugging.
-        """
-        return str(self.to_dict(self))
+        """Return a string representation of the configuration parameters for easy logging and debugging."""
+        return str(self.to_dict())

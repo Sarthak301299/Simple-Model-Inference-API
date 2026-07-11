@@ -1,0 +1,44 @@
+[project]
+name = "simple-model-inference-api"
+version = "0.1.0"
+description = "A simple REST API for model inference using environment-based configuration."
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Framework :: AsyncIO",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.[^/]+|
+    build|
+    dist|
+    \.venv|
+    env|
+    venv|
+    __pycache__|
+    .pytest_cache|
+    .git|
+    .github
+)/
+'''
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
