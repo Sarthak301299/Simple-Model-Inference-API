@@ -116,6 +116,9 @@ class ModelManager:
         elif not isinstance(inputs, Sequence):
             raise TypeError("Input must be an image or a sequence of images.")
 
+        if len(inputs) == 0:
+            raise ValueError("Input image sequence must not be empty")
+
         # Validate and ensure RGB mode for every image
         normalized: List[Image.Image] = []
         for element in inputs:
@@ -144,6 +147,8 @@ class ModelManager:
         """
         if inputs is None:
             raise TypeError("Input tensors are not provided")
+        if not isinstance(inputs, dict):
+            raise TypeError("Input tensors must be provided as a dictionary")
 
         if not self.model_loaded:
             raise ValueError(
@@ -179,8 +184,10 @@ class ModelManager:
             raise TypeError("logits must be a torch.Tensor")
         if logits.dim() != 2:
             raise ValueError("logits must be a 2D tensor [batch, score]")
-        if not isinstance(k, int) or k <= 0:
+        if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
             raise TypeError("k must be a positive integer")
+        if k > logits.size(-1):
+            raise ValueError("k cannot exceed the number of classes in logits")
         if not self.model_loaded:
             raise ValueError(
                 "Model is not loaded. Please call load_model() before calling top_k_from_logits."
@@ -211,7 +218,9 @@ class ModelManager:
 
     def cleanup_model(self) -> None:
         if self.model_loaded:
-            del self.model, self.image_processor
+            self.model = None
+            self.image_processor = None
+            self.model_loaded = False
             gc.collect()
             if self.device == torch.device("cuda"):
                 torch.cuda.empty_cache()
