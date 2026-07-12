@@ -71,6 +71,8 @@ def test_env_overrides_and_parsing(monkeypatch):
         "MODEL_INPUT_SHAPE": "None,3,128,128",
         "TOP_K_PREDICTIONS": "3",
         "MAX_TOP_K_PREDICTIONS": "8",
+        "MAX_CONCURRENT_REQUESTS": "32",
+        "MAX_BATCH_SIZE": "8",
     }
 
     for key, value in env.items():
@@ -95,6 +97,8 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.MODEL_INPUT_SHAPE == (None, 3, 128, 128)
     assert config.TOP_K_PREDICTIONS == 3
     assert config.MAX_TOP_K_PREDICTIONS == 8
+    assert config.MAX_CONCURRENT_REQUESTS == 32
+    assert config.MAX_BATCH_SIZE == 8
 
 
 def make_config(**overrides):
@@ -117,6 +121,9 @@ def make_config(**overrides):
         "MODEL_INPUT_SHAPE": (1, 3, 224, 224),
         "TOP_K_PREDICTIONS": 5,
         "MAX_TOP_K_PREDICTIONS": 10,
+        "MAX_CONCURRENT_REQUESTS": 256,
+        "MAX_BATCH_SIZE": 32,
+        "BATCHING_TIMEOUT_MS": 3,
     }
     return Config(**{**defaults, **overrides})
 
@@ -155,6 +162,9 @@ def test_validate_accepts_valid_config():
         {"TOP_K_PREDICTIONS": 0, "MAX_TOP_K_PREDICTIONS": 10},
         {"TOP_K_PREDICTIONS": 11, "MAX_TOP_K_PREDICTIONS": 10},
         {"MAX_TOP_K_PREDICTIONS": 101},
+        {"MAX_CONCURRENT_REQUESTS": 512},
+        {"MAX_BATCH_SIZE": 128},
+        {"BATCHING_TIMEOUT_MS": 10},
     ],
 )
 def test_validate_rejects_invalid_configurations(kwargs):

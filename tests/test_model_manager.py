@@ -4,7 +4,7 @@ import pytest
 import torch
 from PIL import Image
 
-from model_loader import ModelLoader
+from model_manager import ModelManager
 
 
 class FakeProcessor:
@@ -43,56 +43,58 @@ class FakeModel:
 def test_init_validation():
     # invalid model_name
     with pytest.raises(ValueError):
-        ModelLoader(model_name=None)
+        ModelManager(model_name=None)
     with pytest.raises(ValueError):
-        ModelLoader(model_name="not-a-model")
+        ModelManager(model_name="not-a-model")
     with pytest.raises(ValueError):
-        ModelLoader(device="not-a-device")
+        ModelManager(device="not-a-device")
 
 
 def test_load_model_monkeypatched(monkeypatch):
-    loader = ModelLoader()
+    manager = ModelManager()
 
     # monkeypatch AutoImageProcessor and AutoModelForImageClassification
     monkeypatch.setattr(
-        "model_loader.AutoImageProcessor",
+        "model_manager.AutoImageProcessor",
         types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
     )
     monkeypatch.setattr(
-        "model_loader.AutoModelForImageClassification",
+        "model_manager.AutoModelForImageClassification",
         types.SimpleNamespace(from_pretrained=lambda name: FakeModel()),
     )
 
     # Should not raise
-    loader.load_model()
-    assert isinstance(loader.image_processor, FakeProcessor)
-    assert isinstance(loader.model, FakeModel)
-    assert loader.model.moved_to == loader.device
+    manager.load_model()
+    assert isinstance(manager.image_processor, FakeProcessor)
+    assert isinstance(manager.model, FakeModel)
+    assert manager.model.moved_to == manager.device
 
 
 def test_preprocess_and_predict(monkeypatch):
-    loader = ModelLoader()
+    manager = ModelManager()
     # set a fake model and fake processor directly (skip load_model)
-    loader.model = FakeModel()
-    loader.image_processor = FakeProcessor()
+    manager.model = FakeModel()
+    manager.model_loaded = True
+    manager.image_processor = FakeProcessor()
 
     img = Image.new("RGB", (10, 10), color="red")
-    inputs = loader.preprocess_inputs(img)
+    inputs = manager.preprocess_inputs(img)
     assert "pixel_values" in inputs
-    assert inputs["pixel_values"].device.type == loader.device.type
+    assert inputs["pixel_values"].device.type == manager.device.type
 
-    logits = loader.predict(inputs)
+    logits = manager.predict(inputs)
     assert isinstance(logits, torch.Tensor)
     assert logits.shape[1] == 3
 
 
 def test_top_k_from_logits(monkeypatch):
-    loader = ModelLoader()
+    manager = ModelManager()
     # provide a fake loaded model with id2label
-    loader.model = FakeModel(id2label={0: "a", 1: "b", 2: "c"})
+    manager.model = FakeModel(id2label={0: "a", 1: "b", 2: "c"})
+    manager.model_loaded = True
 
     logits = torch.tensor([[0.1, 2.0, 0.5], [1.0, 0.2, 0.3]])
-    top2 = loader.top_k_from_logits(logits, k=2)
+    top2 = manager.top_k_from_logits(logits, k=2)
     assert isinstance(top2, list)
     assert len(top2) == 2
     # check label names and float scores
@@ -103,69 +105,73 @@ def test_top_k_from_logits(monkeypatch):
 
 
 def test_preprocess_inputs_sequence_with_non_image():
-    loader = ModelLoader()
-    loader.model = FakeModel()
-    loader.image_processor = FakeProcessor()
+    manager = ModelManager()
+    manager.model = FakeModel()
+    manager.model_loaded = True
+    manager.image_processor = FakeProcessor()
 
     # sequence containing a non-image element should raise
     with pytest.raises(TypeError):
-        loader.preprocess_inputs(
+        manager.preprocess_inputs(
             [Image.new("RGB", (2, 2)), 123]  # pyright: ignore [reportArgumentType]
         )
 
 
 def test_top_k_invalid_k_values():
-    loader = ModelLoader()
-    loader.model = FakeModel()
+    manager = ModelManager()
+    manager.model = FakeModel()
+    manager.model_loaded = True
     logits = torch.zeros(2, 3)
 
     with pytest.raises(TypeError):
-        loader.top_k_from_logits(logits, k=0)
+        manager.top_k_from_logits(logits, k=0)
     with pytest.raises(TypeError):
-        loader.top_k_from_logits(logits, k=-1)
+        manager.top_k_from_logits(logits, k=-1)
     with pytest.raises(TypeError):
-        loader.top_k_from_logits(
+        manager.top_k_from_logits(
             logits, k="two"  # pyright: ignore [reportArgumentType]
         )
 
 
 def test_top_k_missing_id2label_raises():
-    loader = ModelLoader()
+    manager = ModelManager()
     # model.config exists but has no id2label attribute
-    loader.model = SimpleNamespace(config=SimpleNamespace())
+    manager.model = SimpleNamespace(config=SimpleNamespace())
+    manager.model_loaded = True
     with pytest.raises(AttributeError):
-        loader.top_k_from_logits(torch.zeros(1, 3), k=1)
+        manager.top_k_from_logits(torch.zeros(1, 3), k=1)
 
 
 def test_top_k_id2label_index_fallback():
-    loader = ModelLoader()
+    manager = ModelManager()
     # provide id2label as a sequence too small to cover indices -> triggers except
-    loader.model = FakeModel(id2label=["only"])
+    manager.model = FakeModel(id2label=["only"])
+    manager.model_loaded = True
     logits = torch.tensor([[0.1, 2.0, 0.5]])
-    res = loader.top_k_from_logits(logits, k=3)
+    res = manager.top_k_from_logits(logits, k=3)
     # index 0 maps to the provided item, out-of-range indices fallback
     assert [lbl for lbl, _ in res[0]] == ["1", "2", "only"]
 
 
 def test_methods_raise_if_not_loaded():
-    loader = ModelLoader()
+    manager = ModelManager()
     # ensure model unset
-    loader.model = None
+    manager.model = None
     img = Image.new("RGB", (5, 5))
     with pytest.raises(ValueError):
-        loader.preprocess_inputs(img)
+        manager.preprocess_inputs(img)
     with pytest.raises(ValueError):
-        loader.predict({"pixel_values": torch.zeros(1, 3, 224, 224)})
+        manager.predict({"pixel_values": torch.zeros(1, 3, 224, 224)})
     with pytest.raises(ValueError):
-        loader.top_k_from_logits(torch.zeros(1, 3), k=1)
+        manager.top_k_from_logits(torch.zeros(1, 3), k=1)
 
 
 def test_load_model_file_not_found(monkeypatch):
     """If HF loading fails and no local model_path is provided, load_model should raise FileNotFoundError."""
-    loader = ModelLoader()
-    # return a valid processor but make the model loader raise
+    manager = ModelManager()
+    # return a valid processor but make the model manager raise
     monkeypatch.setattr(
-        "model_loader.AutoImageProcessor",
+        "model_manager.AutoImageProcessor",
         types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
     )
 
@@ -174,57 +180,62 @@ def test_load_model_file_not_found(monkeypatch):
         def from_pretrained(name):
             raise RuntimeError("simulated HF failure")
 
-    monkeypatch.setattr("model_loader.AutoModelForImageClassification", Fail)
+    monkeypatch.setattr("model_manager.AutoModelForImageClassification", Fail)
 
     with pytest.raises(FileNotFoundError):
-        loader.load_model()
+        manager.load_model()
 
 
 def test_preprocess_inputs_invalid_type():
-    loader = ModelLoader()
-    loader.model = FakeModel()
-    loader.image_processor = FakeProcessor()
+    manager = ModelManager()
+    manager.model = FakeModel()
+    manager.model_loaded = True
+    manager.image_processor = FakeProcessor()
 
     # None input
     with pytest.raises(TypeError):
-        loader.preprocess_inputs(None)
+        manager.preprocess_inputs(None)
 
     # wrong datatype (int)
     with pytest.raises(TypeError):
-        loader.preprocess_inputs(123)  # pyright: ignore [reportArgumentType]
+        manager.preprocess_inputs(123)  # pyright: ignore [reportArgumentType]
 
 
 def test_predict_invalid_inputs():
-    loader = ModelLoader()
-    loader.model = FakeModel()
+    manager = ModelManager()
+    manager.model = FakeModel()
+    manager.model_loaded = True
 
     # None -> TypeError (explicit check)
     with pytest.raises(TypeError):
-        loader.predict(None)  # pyright: ignore [reportArgumentType]
+        manager.predict(None)  # pyright: ignore [reportArgumentType]
 
     # Missing expected key will raise KeyError inside FakeModel
     with pytest.raises(KeyError):
-        loader.predict({"wrong_key": torch.zeros(1, 3, 224, 224)})
+        manager.predict({"wrong_key": torch.zeros(1, 3, 224, 224)})
 
 
 def test_top_k_from_logits_invalid():
-    loader = ModelLoader()
-    loader.model = FakeModel()
+    manager = ModelManager()
+    manager.model = FakeModel()
+    manager.model_loaded = True
 
     # non-tensor input
     with pytest.raises(TypeError):
-        loader.top_k_from_logits([1, 2, 3], k=1)  # pyright: ignore [reportArgumentType]
+        manager.top_k_from_logits(
+            [1, 2, 3], k=1  # pyright: ignore [reportArgumentType]
+        )
 
     # wrong-dim tensor
     with pytest.raises(ValueError):
-        loader.top_k_from_logits(torch.zeros(2, 3, 4), k=1)
+        manager.top_k_from_logits(torch.zeros(2, 3, 4), k=1)
 
 
 def test_get_model_info():
-    loader = ModelLoader(
+    manager = ModelManager(
         model_name="microsoft/resnet-50", device="cpu", model_path=None
     )
-    info = loader.get_model_info()
+    info = manager.get_model_info()
     assert isinstance(info, dict)
     assert set(info.keys()) == {"name", "device", "model_path"}
     assert info["name"] == "microsoft/resnet-50"

@@ -30,6 +30,9 @@ class Config:
     MODEL_INPUT_SHAPE: Tuple[Optional[int], int, int, int] = (None, 3, 224, 224)
     TOP_K_PREDICTIONS: int = 5
     MAX_TOP_K_PREDICTIONS: int = 10
+    MAX_CONCURRENT_REQUESTS: int = 256
+    MAX_BATCH_SIZE: int = 64
+    BATCHING_TIMEOUT_MS: int = 3
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -80,6 +83,13 @@ class Config:
         max_top_k_predictions = int(
             os.getenv("MAX_TOP_K_PREDICTIONS", cls.MAX_TOP_K_PREDICTIONS)
         )
+        max_concurrent_requests = int(
+            os.getenv("MAX_CONCURRENT_REQUESTS", cls.MAX_CONCURRENT_REQUESTS)
+        )
+        max_batch_size = int(os.getenv("MAX_BATCH_SIZE", cls.MAX_BATCH_SIZE))
+        batching_timeout_ms = int(
+            os.getenv("BATCHING_TIMEOUT_MS", cls.BATCHING_TIMEOUT_MS)
+        )
 
         config = cls(
             MODEL_NAME=model_name,
@@ -99,6 +109,9 @@ class Config:
             MODEL_INPUT_SHAPE=model_input_shape,
             TOP_K_PREDICTIONS=top_k_predictions,
             MAX_TOP_K_PREDICTIONS=max_top_k_predictions,
+            MAX_CONCURRENT_REQUESTS=max_concurrent_requests,
+            MAX_BATCH_SIZE=max_batch_size,
+            BATCHING_TIMEOUT_MS=batching_timeout_ms,
         )
 
         cls.validate(config)
@@ -160,6 +173,18 @@ class Config:
             raise ValueError(
                 "MAX_TOP_K_PREDICTIONS must be a positive integer less than or equal to 100."
             )
+        if not (0 < config.MAX_CONCURRENT_REQUESTS <= 256):
+            raise ValueError(
+                "MAX_CONCURRENT_REQUESTS must be a positive integer less than or equal to 256."
+            )
+        if not (0 < config.MAX_BATCH_SIZE <= 64):
+            raise ValueError(
+                "MAX_BATCH_SIZE must be a positive integer less than or equal to 64."
+            )
+        if not (0 < config.BATCHING_TIMEOUT_MS <= 5):
+            raise ValueError(
+                "BATCHING_TIMEOUT_MS must be a positive integer less than or equal to 5."
+            )
 
     def to_dict(self) -> dict:
         """Convert the configuration parameters to a dictionary for easy access and manipulation."""
@@ -181,6 +206,9 @@ class Config:
             "MODEL_INPUT_SHAPE": self.MODEL_INPUT_SHAPE,
             "TOP_K_PREDICTIONS": self.TOP_K_PREDICTIONS,
             "MAX_TOP_K_PREDICTIONS": self.MAX_TOP_K_PREDICTIONS,
+            "MAX_CONCURRENT_REQUESTS": self.MAX_CONCURRENT_REQUESTS,
+            "MAX_BATCH_SIZE": self.MAX_BATCH_SIZE,
+            "BATCHING_TIMEOUT_MS": self.BATCHING_TIMEOUT_MS,
         }
 
     def __str__(self) -> str:
