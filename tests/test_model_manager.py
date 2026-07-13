@@ -34,8 +34,8 @@ class FakeModel:
     def eval(self):
         pass
 
-    def __call__(self, **inputs):
-        batch_size = inputs["pixel_values"].shape[0]
+    def __call__(self, inputs):
+        batch_size = inputs.shape[0]
         # return logits for three classes
         logits = torch.tensor([[0.1, 2.0, 0.5]] * batch_size)
         return SimpleNamespace(logits=logits)
@@ -80,12 +80,13 @@ def test_preprocess_and_predict(monkeypatch):
 
     img = Image.new("RGB", (10, 10), color="red")
     inputs = manager.preprocess_inputs(img)
-    assert "pixel_values" in inputs
-    assert inputs["pixel_values"].device.type == manager.device.type
+    for inp in inputs:
+        assert inp.device.type == manager.device.type
 
-    logits = manager.predict(inputs)
+    logits, inference_time_ms = manager.predict(inputs)
     assert isinstance(logits, torch.Tensor)
     assert logits.shape[1] == 3
+    assert isinstance(inference_time_ms, float)
 
 
 def test_top_k_from_logits(monkeypatch):
@@ -162,7 +163,7 @@ def test_methods_raise_if_not_loaded():
     with pytest.raises(ValueError):
         manager.preprocess_inputs(img)
     with pytest.raises(ValueError):
-        manager.predict({"pixel_values": torch.zeros(1, 3, 224, 224)})
+        manager.predict([torch.zeros(1, 3, 224, 224)])
     with pytest.raises(ValueError):
         manager.top_k_from_logits(torch.zeros(1, 3), k=1)
 
@@ -243,10 +244,6 @@ def test_predict_invalid_inputs():
     # None -> TypeError (explicit check)
     with pytest.raises(TypeError):
         manager.predict(None)  # pyright: ignore [reportArgumentType]
-
-    # Missing expected key will raise KeyError inside FakeModel
-    with pytest.raises(KeyError):
-        manager.predict({"wrong_key": torch.zeros(1, 3, 224, 224)})
 
 
 def test_top_k_from_logits_invalid():

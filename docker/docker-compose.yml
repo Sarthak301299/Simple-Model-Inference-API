@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  model-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: simple-model-inference-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_NAME=microsoft/resnet-50
+      - INFERENCE_DEVICE=cpu
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - MAX_BATCH_SIZE=64
+      - BATCHING_TIMEOUT_MS=3
+      - PYTHONPATH=/app/src
+    volumes:
+      - model-cache:/root/.cache/huggingface
+      - ./models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Uncomment for GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  model-cache:
+    driver: local

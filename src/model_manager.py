@@ -106,7 +106,7 @@ class ModelManager:
 
     def preprocess_inputs(
         self, inputs: Image.Image | Sequence[Image.Image] | None = None
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Sequence[torch.Tensor]:
         """
         Convert PIL image(s) into model-ready tensors.
 
@@ -114,8 +114,7 @@ class ModelManager:
             inputs: A single `PIL.Image` or a sequence of `PIL.Image` objects.
 
         Returns:
-            A dict mapping model input names to `torch.Tensor` values on
-            `self.device` (e.g., `{'pixel_values': tensor}`).
+            A sequence of `torch.Tensor` values on  containing processed pixel values loaded on the device.
         """
         if not self.model_loaded:
             raise ValueError(
@@ -144,25 +143,24 @@ class ModelManager:
 
         # Use the AutoImageProcessor to prepare tensors and move to device
         logger.debug("Preprocessing %d image(s)", len(normalized))
-        processed_inputs = self.image_processor(normalized, return_tensors="pt")
-        processed_inputs = {k: v.to(self.device) for k, v in processed_inputs.items()}
+        processed_inputs: Sequence[torch.Tensor] = self.image_processor(
+            normalized, return_tensors="pt"
+        )["pixel_values"].to(self.device)
         logger.debug("Preprocessing completed for %d image(s)", len(normalized))
         return processed_inputs
 
-    def predict(self, inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def predict(self, inputs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, float]:
         """
         Run the model forward pass and return logits.
 
         Args:
-            inputs: Preprocessed input dict (from `preprocess_inputs`).
+            inputs: Preprocessed input sequence (from `preprocess_inputs`).
 
         Returns:
-            A `torch.Tensor` of logits with shape (batch_size, num_classes).
+            A `torch.Tensor` of logits with shape (batch_size, num_classes) and the inference time.
         """
         if inputs is None:
             raise TypeError("Input tensors are not provided")
-        if not isinstance(inputs, dict):
-            raise TypeError("Input tensors must be provided as a dictionary")
 
         if not self.model_loaded:
             raise ValueError(
@@ -174,11 +172,11 @@ class ModelManager:
         start_time = time.perf_counter()
         self.model.eval()
         with torch.no_grad():
-            outputs = self.model(**inputs)
+            outputs = self.model(inputs)
 
         latency_ms = (time.perf_counter() - start_time) * 1000
         logger.info("Prediction completed in %.3f ms", latency_ms)
-        return outputs.logits
+        return outputs.logits, latency_ms
 
     def get_model_info(self) -> Dict[str, str | None]:
         """Return basic metadata about the manager configuration.

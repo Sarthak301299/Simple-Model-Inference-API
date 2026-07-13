@@ -47,7 +47,7 @@ def init_model() -> None:
 
 async def perform_inference(
     image_batch: List[Image.Image],
-) -> List[List[Tuple[str, float]]]:
+) -> Tuple[List[List[Tuple[str, float]]], float]:
     """Read image bytes, run inference, and return top-k predictions."""
     config: Config = app.state.config
     model_manager: ModelManager = app.state.model_manager
@@ -55,7 +55,7 @@ async def perform_inference(
         # Preprocess the images and produce predictions from the loaded model.
         if model_manager is not None:
             processed_image_batch = model_manager.preprocess_inputs(image_batch)
-            logits = model_manager.predict(processed_image_batch)
+            logits, inference_time_ms = model_manager.predict(processed_image_batch)
             output = model_manager.top_k_from_logits(logits, config.TOP_K_PREDICTIONS)
         else:
             raise ValueError("Model Manager is not initialized during ")
@@ -63,12 +63,12 @@ async def perform_inference(
     except Exception as e:
         logger.error(f"Exception {e} while performing inference.")
         raise
-    return output
+    return output, inference_time_ms
 
 
 async def get_image_from_upload_file(
-    upload: Tuple[UploadFile, asyncio.Future[List[Tuple[str, float]]]],
-) -> Tuple[Image.Image, asyncio.Future[List[Tuple[str, float]]]]:
+    upload: Tuple[UploadFile, asyncio.Future[Tuple[List[Tuple[str, float]], float]]],
+) -> Tuple[Image.Image, asyncio.Future[Tuple[List[Tuple[str, float]], float]]]:
     img_bytes = await upload[0].read()
     stream = io.BytesIO(img_bytes)
     try:
@@ -98,9 +98,11 @@ async def batch_processing_loop() -> None:
     # Keep draining the queue until shutdown is requested and the queue is empty.
     while not shutdown_event.is_set() or not inference_queue.empty():
         try:
-            batch: List[Tuple[Image.Image, asyncio.Future[List[Tuple[str, float]]]]] = (
-                []
-            )
+            batch: List[
+                Tuple[
+                    Image.Image, asyncio.Future[Tuple[List[Tuple[str, float]], float]]
+                ]
+            ] = []
             if shutdown_event.is_set():
                 try:
                     first_item = inference_queue.get_nowait()
@@ -144,10 +146,10 @@ async def batch_processing_loop() -> None:
                     break
 
             batch_inputs = [payload for (payload, _) in batch]
-            topkoutputs = await perform_inference(batch_inputs)
+            topkoutputs, inference_time_ms = await perform_inference(batch_inputs)
             for i, (_, response_ticket) in enumerate(batch):
                 if not response_ticket.done():
-                    response_ticket.set_result(topkoutputs[i])
+                    response_ticket.set_result((topkoutputs[i], inference_time_ms))
                 inference_queue.task_done()
         except Exception as e:
             logger.warning(f"Error in batch processing loop: {e}")
@@ -252,7 +254,7 @@ async def info() -> JSONResponse:
 @app.post("/predict")
 async def handle_predict_request(
     file: UploadFile, metadata: Optional[str] = None
-) -> Dict[str, List[Tuple[str, float]]]:
+) -> Dict[str, List[Tuple[str, float]] | float]:
     """Enqueue an inference request and await the resulting predictions."""
     inference_queue: asyncio.Queue = app.state.inference_queue
     shutdown_event: asyncio.Event = app.state.shutdown_event
@@ -272,8 +274,8 @@ async def handle_predict_request(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Queue full."
         )
-    result: List[Tuple[str, float]] = await ticket
-    return {"prediction": result}
+    result: Tuple[List[Tuple[str, float]], float] = await ticket
+    return {"prediction": result[0], "inference_time_ms": result[1]}
 
 
 @app.get("/")

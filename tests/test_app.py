@@ -56,10 +56,10 @@ def test_init_model_initializes_and_loads_model(monkeypatch):
 def test_perform_inference_processes_uploaded_image_bytes():
     class FakeModelManager:
         def preprocess_inputs(self, images):
-            return {"pixel_values": images}
+            return [images]
 
         def predict(self, processed_inputs):
-            return processed_inputs["pixel_values"]
+            return [processed_inputs], 12.42
 
         def top_k_from_logits(self, logits, k):
             return [[("cat", 0.99)]]
@@ -73,7 +73,7 @@ def test_perform_inference_processes_uploaded_image_bytes():
 
     result = asyncio.run(app_module.perform_inference([image]))
 
-    assert result == [[("cat", 0.99)]]
+    assert result == ([[("cat", 0.99)]], 12.42)
 
 
 def test_perform_inference_raises_when_model_manager_is_missing():
@@ -203,7 +203,7 @@ def test_handle_predict_request_returns_prediction_for_enqueued_work():
         def put_nowait(self, item):
             uploaded_file, ticket = item
             assert uploaded_file.filename == "image.jpg"
-            ticket.set_result([("bird", 0.95)])
+            ticket.set_result(([("bird", 0.95)], 12.42))
 
     app_module.app.state.inference_queue = ImmediateQueue()
     app_module.app.state.shutdown_event = asyncio.Event()
@@ -211,4 +211,4 @@ def test_handle_predict_request_returns_prediction_for_enqueued_work():
 
     response = asyncio.run(app_module.handle_predict_request(file, "metadata"))
 
-    assert response == {"prediction": [("bird", 0.95)]}
+    assert response == {"prediction": [("bird", 0.95)], "inference_time_ms": 12.42}
