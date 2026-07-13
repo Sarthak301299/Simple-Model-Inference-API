@@ -2,7 +2,7 @@
 An FastAPI application that serves as an API for inference on an Image Classification model. The application should be able to handle
 """
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 from contextlib import asynccontextmanager
@@ -10,11 +10,10 @@ import logging
 import asyncio
 import time
 import io
-import base64
 from config import Config
 from model_manager import ModelManager
-from collections.abc import AsyncIterator
-from typing import List, Tuple, Dict, Any
+from collections.abc import AsyncGenerator
+from typing import List, Tuple, Dict, Optional
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 def init_model() -> None:
     """Initialize and load the image classification model into application state."""
     # Read the current configuration and create a model manager for the selected backend.
-    config = app.state.config
+    config: Config = app.state.config
     try:
         app.state.model_manager = ModelManager(
             config.MODEL_NAME, config.INFERENCE_DEVICE
@@ -47,28 +46,12 @@ def init_model() -> None:
 
 
 async def perform_inference(
-    batch_inputs: List[Dict[str, Any]],
+    image_batch: List[Image.Image],
 ) -> List[List[Tuple[str, float]]]:
-    """Decode base64 image payloads, run inference, and return top-k predictions."""
-    config = app.state.config
-    model_manager = app.state.model_manager
+    """Read image bytes, run inference, and return top-k predictions."""
+    config: Config = app.state.config
+    model_manager: ModelManager = app.state.model_manager
     try:
-        # Convert each incoming payload into a PIL image before preprocessing.
-        image_batch: List[Image.Image] = []
-        for payload in batch_inputs:
-            if not isinstance(payload, dict):
-                raise ValueError("Each inference payload must be a dictionary")
-            b64_data = payload.get("image")
-            if not isinstance(b64_data, str) or not b64_data.strip():
-                raise ValueError(
-                    "Each inference payload must include a non-empty image string"
-                )
-            if "," in b64_data:
-                b64_data = b64_data.split(",")[1]
-            img_bytes = base64.b64decode(b64_data)
-            image = Image.open(io.BytesIO(img_bytes))
-            image_batch.append(image)
-
         # Preprocess the images and produce predictions from the loaded model.
         if model_manager is not None:
             processed_image_batch = model_manager.preprocess_inputs(image_batch)
@@ -83,16 +66,41 @@ async def perform_inference(
     return output
 
 
+async def get_image_from_upload_file(
+    upload: Tuple[UploadFile, asyncio.Future[List[Tuple[str, float]]]],
+) -> Tuple[Image.Image, asyncio.Future[List[Tuple[str, float]]]]:
+    img_bytes = await upload[0].read()
+    stream = io.BytesIO(img_bytes)
+    try:
+        image: Image.Image = Image.open(stream)
+        image.load()
+    except Exception as e:
+        logger.error(f"Error loading image from upload file. Exception {e}")
+        upload[1].set_exception(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded File is not an Image.",
+            )
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded File is not an Image.",
+        )
+    return (image, upload[1])
+
+
 async def batch_processing_loop() -> None:
     """Continuously collect queued requests into batches and dispatch inference work."""
-    config = app.state.config
-    inference_queue = app.state.inference_queue
-    shutdown_event = app.state.shutdown_event
+    config: Config = app.state.config
+    inference_queue: asyncio.Queue = app.state.inference_queue
+    shutdown_event: asyncio.Event = app.state.shutdown_event
 
     # Keep draining the queue until shutdown is requested and the queue is empty.
     while not shutdown_event.is_set() or not inference_queue.empty():
         try:
-            batch: List[Tuple[Dict[str, Any], asyncio.Future[Any]]] = []
+            batch: List[Tuple[Image.Image, asyncio.Future[List[Tuple[str, float]]]]] = (
+                []
+            )
             if shutdown_event.is_set():
                 try:
                     first_item = inference_queue.get_nowait()
@@ -105,7 +113,14 @@ async def batch_processing_loop() -> None:
                     )
                 except asyncio.TimeoutError:
                     continue
-            batch.append(first_item)
+
+            try:
+                batch.append(await get_image_from_upload_file(first_item))
+            except Exception as e:
+                logger.error(f"Exception {e} Getting first item from inference queue.")
+                inference_queue.task_done()
+                continue
+
             window = 0 if shutdown_event.is_set() else config.BATCHING_TIMEOUT_MS
             start_time = time.perf_counter()
             while len(batch) < config.MAX_BATCH_SIZE:
@@ -117,7 +132,14 @@ async def batch_processing_loop() -> None:
                     item = await asyncio.wait_for(
                         inference_queue.get(), timeout=max(0, time_left)
                     )
-                    batch.append(item)
+                    try:
+                        batch.append(await get_image_from_upload_file(item))
+                    except Exception as e:
+                        logger.error(
+                            f"Exception {e} Getting item from inference queue."
+                        )
+                        inference_queue.task_done()
+                        continue
                 except asyncio.TimeoutError:
                     break
 
@@ -134,13 +156,13 @@ async def batch_processing_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialize the model and background batching loop for the application lifetime."""
     # Load the model once when the FastAPI app starts.
     init_model()
-    model_manager = app.state.model_manager
-    shutdown_event = app.state.shutdown_event
-    batch_task = asyncio.create_task(batch_processing_loop())
+    model_manager: ModelManager = app.state.model_manager
+    shutdown_event: asyncio.Event = app.state.shutdown_event
+    batch_task: asyncio.Future = asyncio.create_task(batch_processing_loop())
     yield
     # Stop the batching loop and clean up the model on shutdown.
     shutdown_event.set()
@@ -173,9 +195,9 @@ def liveness_check() -> JSONResponse:
 @app.get("/health/ready")
 async def readyness_check() -> JSONResponse:
     """Report whether the application is ready to accept inference requests."""
-    model_manager = app.state.model_manager
-    inference_queue = app.state.inference_queue
-    shutdown_event = app.state.shutdown_event
+    model_manager: ModelManager = app.state.model_manager
+    inference_queue: asyncio.Queue = app.state.inference_queue
+    shutdown_event: asyncio.Event = app.state.shutdown_event
 
     # Reject readiness while the service is shutting down.
     if shutdown_event.is_set():
@@ -204,8 +226,8 @@ async def readyness_check() -> JSONResponse:
 @app.get("/health/startup")
 def startup_check() -> JSONResponse:
     """Report whether the application startup process has completed."""
-    model_manager = app.state.model_manager
-    is_started = model_manager is not None and model_manager.model_loaded
+    model_manager: ModelManager = app.state.model_manager
+    is_started: bool = model_manager is not None and model_manager.model_loaded
 
     # The service is still starting until the model has been loaded.
     if is_started:
@@ -219,26 +241,21 @@ def startup_check() -> JSONResponse:
         )
 
 
+@app.get("/info")
+async def info() -> JSONResponse:
+    model_manager: ModelManager = app.state.model_manager
+    return JSONResponse(
+        status_code=status.HTTP_200_OK, content=model_manager.get_model_info()
+    )
+
+
 @app.post("/predict")
 async def handle_predict_request(
-    payload: Dict[str, Any],
+    file: UploadFile, metadata: Optional[str] = None
 ) -> Dict[str, List[Tuple[str, float]]]:
     """Enqueue an inference request and await the resulting predictions."""
-    inference_queue = app.state.inference_queue
-    shutdown_event = app.state.shutdown_event
-
-    if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payload must be a JSON object.",
-        )
-
-    image_payload = payload.get("image")
-    if not isinstance(image_payload, str) or not image_payload.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payload must include a non-empty 'image' field.",
-        )
+    inference_queue: asyncio.Queue = app.state.inference_queue
+    shutdown_event: asyncio.Event = app.state.shutdown_event
 
     # Reject requests once the application is shutting down.
     if shutdown_event.is_set():
@@ -250,7 +267,7 @@ async def handle_predict_request(
     # Create a ticket that will receive the prediction result from the batch loop.
     ticket = asyncio.get_running_loop().create_future()
     try:
-        inference_queue.put_nowait((payload, ticket))
+        inference_queue.put_nowait((file, ticket))
     except asyncio.QueueFull:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Queue full."

@@ -1,3 +1,4 @@
+import tempfile
 import types
 from types import SimpleNamespace
 import pytest
@@ -184,6 +185,39 @@ def test_load_model_file_not_found(monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         manager.load_model()
+
+
+def test_load_model_falls_back_to_local_weights_when_hf_load_fails(monkeypatch):
+    manager = ModelManager(model_name="microsoft/resnet-50", device="cpu")
+    monkeypatch.setattr(
+        "model_manager.AutoImageProcessor",
+        types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
+    )
+
+    class LocalModel(FakeModel):
+        def load_state_dict(self, state):
+            self.loaded_state = state
+
+    class FailThenLoad:
+        calls = 0
+
+        @classmethod
+        def from_pretrained(cls, name):
+            cls.calls += 1
+            if cls.calls == 1:
+                raise RuntimeError("simulated HF failure")
+            return LocalModel()
+
+    monkeypatch.setattr("model_manager.AutoModelForImageClassification", FailThenLoad)
+
+    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
+        torch.save({"state": torch.tensor([1.0])}, tmp.name)
+        manager.model_path = tmp.name
+
+    manager.load_model()
+
+    assert manager.model_loaded is True
+    assert manager.model.loaded_state["state"].item() == 1.0
 
 
 def test_preprocess_inputs_invalid_type():

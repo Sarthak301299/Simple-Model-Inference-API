@@ -77,15 +77,29 @@ class ModelManager:
                 self.model_name
             )
         except Exception:
+            exc: Exception = Exception()
             logger.warning(
                 "Falling back to local model weights from %s",
                 self.model_path,
             )
+            if self.model is None:
+                try:
+                    self.model = AutoModelForImageClassification.from_pretrained(
+                        self.model_name
+                    )
+                except Exception as retry_exc:
+                    exc = retry_exc
             if self.model_path is not None and os.path.exists(self.model_path):
+                if self.model is None:
+                    raise RuntimeError(
+                        "Unable to initialize a model instance from the pretrained source."
+                    ) from exc
                 state = torch.load(self.model_path, map_location=self.device)
+                if isinstance(state, dict) and "state_dict" in state:
+                    state = state["state_dict"]
                 self.model.load_state_dict(state)
             else:
-                raise FileNotFoundError(f"Model path {self.model_path}")
+                raise FileNotFoundError(f"Model path {self.model_path}") from exc
         self.model.to(self.device)
         self.model_loaded = True
         logger.info("Model %s loaded successfully", self.model_name)

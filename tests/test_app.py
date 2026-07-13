@@ -1,10 +1,9 @@
 import asyncio
-import base64
 import io
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -54,7 +53,7 @@ def test_init_model_initializes_and_loads_model(monkeypatch):
     assert app_module.app.state.model_manager.model_loaded is True
 
 
-def test_perform_inference_decodes_base64_payload():
+def test_perform_inference_processes_uploaded_image_bytes():
     class FakeModelManager:
         def preprocess_inputs(self, images):
             return {"pixel_values": images}
@@ -68,13 +67,11 @@ def test_perform_inference_decodes_base64_payload():
     image = Image.new("RGB", (8, 8), color="red")
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-    payload = {"image": f"data:image/jpeg;base64,{encoded}"}
 
     app_module.app.state.config = SimpleNamespace(TOP_K_PREDICTIONS=1)
     app_module.app.state.model_manager = FakeModelManager()
 
-    result = asyncio.run(app_module.perform_inference([payload]))
+    result = asyncio.run(app_module.perform_inference([image]))
 
     assert result == [[("cat", 0.99)]]
 
@@ -83,44 +80,12 @@ def test_perform_inference_raises_when_model_manager_is_missing():
     image = Image.new("RGB", (4, 4), color="blue")
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-    payload = {"image": f"data:image/jpeg;base64,{encoded}"}
 
     app_module.app.state.model_manager = None
     app_module.app.state.config = SimpleNamespace(TOP_K_PREDICTIONS=1)
 
     with pytest.raises(ValueError):
-        asyncio.run(app_module.perform_inference([payload]))
-
-
-def test_perform_inference_rejects_invalid_payload_shape():
-    app_module.app.state.model_manager = SimpleNamespace()
-    app_module.app.state.config = SimpleNamespace(TOP_K_PREDICTIONS=1)
-
-    with pytest.raises(ValueError):
-        asyncio.run(app_module.perform_inference([{"image": "   "}]))
-
-
-def test_batch_processing_loop_writes_results_to_waiting_ticket(monkeypatch):
-    async def fake_perform_inference(batch_inputs):
-        return [[("dog", 0.88)]]
-
-    monkeypatch.setattr(app_module, "perform_inference", fake_perform_inference)
-
-    async def run_batch():
-        ticket = asyncio.get_running_loop().create_future()
-        payload = {"image": "dummy"}
-        queue_instance = asyncio.Queue(maxsize=4)
-        await queue_instance.put((payload, ticket))
-        app_module.app.state.inference_queue = queue_instance
-        app_module.app.state.shutdown_event = asyncio.Event()
-        app_module.app.state.shutdown_event.set()
-        await app_module.batch_processing_loop()
-        return ticket
-
-    ticket = asyncio.run(run_batch())
-
-    assert ticket.result() == [("dog", 0.88)]
+        asyncio.run(app_module.perform_inference([image]))
 
 
 def test_health_endpoints_report_expected_states():
@@ -151,9 +116,11 @@ def test_health_endpoints_report_expected_states():
 
 
 def test_handle_predict_request_rejects_shutdown_and_queue_full():
+    file = UploadFile(filename="image.jpg", file=io.BytesIO(b"dummy"))
+
     app_module.app.state.shutdown_event.set()
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request({"image": "dummy"}))
+        asyncio.run(app_module.handle_predict_request(file, "dummy"))
     assert exc_info.value.status_code == 503
 
     class FullQueue:
@@ -163,21 +130,21 @@ def test_handle_predict_request_rejects_shutdown_and_queue_full():
     app_module.app.state.shutdown_event = asyncio.Event()
     app_module.app.state.inference_queue = FullQueue()
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request({"image": "dummy"}))
+        asyncio.run(app_module.handle_predict_request(file, "dummy"))
     assert exc_info.value.status_code == 429
 
 
-def test_handle_predict_request_rejects_missing_or_blank_image_payload():
-    app_module.app.state.shutdown_event = asyncio.Event()
-    app_module.app.state.inference_queue = asyncio.Queue(maxsize=4)
+def test_get_image_from_upload_file_rejects_non_images():
+    async def run_test():
+        future = asyncio.get_running_loop().create_future()
+        upload_file = UploadFile(filename="bad.jpg", file=io.BytesIO(b"not an image"))
+        with pytest.raises(HTTPException) as exc_info:
+            await app_module.get_image_from_upload_file((upload_file, future))
+        assert exc_info.value.status_code == 400
+        assert future.done() is True
+        assert isinstance(future.exception(), HTTPException)
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request({}))
-    assert exc_info.value.status_code == 400
-
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request({"image": "   "}))
-    assert exc_info.value.status_code == 400
+    asyncio.run(run_test())
 
 
 def test_lifespan_runs_init_and_cleanup(monkeypatch):
@@ -234,12 +201,14 @@ def test_batch_processing_loop_handles_timeout_and_error(monkeypatch):
 def test_handle_predict_request_returns_prediction_for_enqueued_work():
     class ImmediateQueue:
         def put_nowait(self, item):
-            _, ticket = item
+            uploaded_file, ticket = item
+            assert uploaded_file.filename == "image.jpg"
             ticket.set_result([("bird", 0.95)])
 
     app_module.app.state.inference_queue = ImmediateQueue()
     app_module.app.state.shutdown_event = asyncio.Event()
+    file = UploadFile(filename="image.jpg", file=io.BytesIO(b"dummy"))
 
-    response = asyncio.run(app_module.handle_predict_request({"image": "dummy"}))
+    response = asyncio.run(app_module.handle_predict_request(file, "metadata"))
 
     assert response == {"prediction": [("bird", 0.95)]}
