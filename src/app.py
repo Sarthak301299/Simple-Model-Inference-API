@@ -12,17 +12,25 @@ from fastapi import (
     Header,
     Depends,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from contextlib import asynccontextmanager
 import logging
 import io
 import queue
 import hmac
+import time
 from config import Config
 from inference_engine import InferenceEngine
 from collections.abc import AsyncGenerator
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Callable
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+from metrics import (
+    REQUEST_COUNT,
+    REQUEST_LATENCY,
+    REJECTED_COUNT,
+    QueueDepthCollector,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -64,6 +72,32 @@ app = FastAPI(
 )
 app.state.config = Config.from_env()
 app.version = app.state.config.API_VERSION
+
+REGISTRY.register(QueueDepthCollector(lambda: getattr(app.state, "inf_engine", None)))
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next: Callable) -> Response:
+    """Middleware to collect metrics."""
+
+    # Don't measure the metrics endpoint itself.
+    if request.url.path == "/metrics":
+        return await call_next(request)
+
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+
+    REQUEST_LATENCY.labels(endpoint=request.url.path).observe(duration)
+    REQUEST_COUNT.labels(
+        endpoint=request.url.path, status_code=response.status_code
+    ).inc()
+    return response
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health/live", status_code=status.HTTP_200_OK)
@@ -172,6 +206,7 @@ async def handle_predict_request(
 
     # A fast path check for the queue before any reads.
     if engine.inference_queue.full():
+        REJECTED_COUNT.inc()
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Inference Queue is full",
@@ -211,6 +246,7 @@ async def handle_predict_request(
             image
         )
     except queue.Full:
+        REJECTED_COUNT.inc()
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Inference Queue is full",

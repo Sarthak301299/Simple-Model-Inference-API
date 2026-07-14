@@ -17,6 +17,8 @@ venv/
 
 # Data files
 data/
+tests/load/data
+tests/load/*.csv
 
 # VScode setup
 .vscode/*

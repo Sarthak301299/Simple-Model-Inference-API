@@ -1,3 +1,5 @@
+"""An inference engine that decouples the compute-heavy inference operations from network operations."""
+
 import queue
 import threading
 import asyncio
@@ -8,6 +10,7 @@ from PIL import Image
 from typing import Tuple, List
 from config import Config
 from model_manager import ModelManager
+from metrics import MODEL_READY, BATCH_SIZE, INFERENCE_LATENCY
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -126,6 +129,7 @@ class InferenceEngine:
         """Continuously collect queued requests into batches and dispatch inference work."""
 
         self.ready = True
+        MODEL_READY.set(1)
         # Keep draining the queue until shutdown is requested and the queue is empty.
         while not self.shutdown_event.is_set():
             batch: List[
@@ -196,10 +200,12 @@ class InferenceEngine:
                 except queue.Empty:
                     break
 
+            BATCH_SIZE.observe(len(batch))
             batch_inputs, loops, futures = map(list, zip(*batch))
             infout = self.perform_inference(batch_inputs, loops, futures)
             if infout is not None:
                 topkoutputs, inference_time_ms = infout
+                INFERENCE_LATENCY.observe(inference_time_ms / 1000)
                 for i, (_, loop, future) in enumerate(batch):
                     try:
                         result = (topkoutputs[i], inference_time_ms)
@@ -223,4 +229,5 @@ class InferenceEngine:
                 "Inference worker thread did not terminate within timeout. Exiting with potential leaks."
             )
         self.manager.cleanup_model()
+        MODEL_READY.set(0)
         logger.info("Inference Engine: Shutdown complete")
