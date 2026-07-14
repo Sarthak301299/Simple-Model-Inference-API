@@ -57,7 +57,7 @@ WORKDIR /app
 
 # Copy application source code
 COPY --chown=modelapi:modelapi src/ ./src/
-COPY --chown=modelapi:modelapi pyproject.toml .env.shared* .env* ./
+COPY --chown=modelapi:modelapi pyproject.toml .env.shared* ./
 
 # Switch to non-root user
 USER modelapi

@@ -11,6 +11,8 @@ services:
     container_name: simple-model-inference-api-container
     ports:
       - "8000:8000"
+    env_file:
+      - ../.env
     environment:
       - MODEL_NAME=microsoft/resnet-50
       - INFERENCE_DEVICE=cpu

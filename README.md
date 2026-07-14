@@ -81,6 +81,11 @@ docker build -f docker/Dockerfile \
 -t simple-model-inference-api:cu126 .
 ```
 
+Run the container:
+```bash
+docker run --env-file .env -e API_HOST=0.0.0.0 API_PORT=8000 -p 8000:8000 simple-model-inference-api:cpu #Or :cu126
+```
+
 Run with Docker Compose (CPU):
 ```bash
 docker compose -f docker/docker-compose.yml up --build
