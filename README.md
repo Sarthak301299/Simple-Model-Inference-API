@@ -6,6 +6,7 @@ A lightweight, scalable REST API for image classification that uses pre-trained 
 
 - **REST API**: FastAPI-based HTTP interface for image classification
 - **Batch Processing**: Efficient batch inference with dynamic batching to handle surge of requests
+- **Decoupled Async-Compute Architecture**: Offloads compute-bound operations to a dedicated OS-level worker thread, isolating network I/O from hardware execution.
 - **Supported Models**: Tested with ResNet-50
 - **GPU Support**: Automatic GPU detection with CUDA support or CPU fallback
 - **Configuration Management**: Environment-based configuration for flexible deployments
