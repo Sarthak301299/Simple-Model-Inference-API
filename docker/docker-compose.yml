@@ -22,9 +22,13 @@ services:
       - API_PORT=8000
       - PYTHONPATH=/app/src
       - HF_HOME=/home/modelapi/.cache/huggingface
+      # Fixed to match this image's installed dependencies: requirements/cpu.txt has
+      # no CUDA-enabled torch wheels, so this must stay "cpu" regardless of .env.
+      # docker-compose.gpu.yml overrides this to "cuda" for the GPU image, which does
+      # have CUDA wheels installed.
       - INFERENCE_DEVICE=cpu
-      # Everything else (MODEL_NAME, INFERENCE_DEVICE, MAX_BATCH_SIZE, API_KEY, ...)
-      # comes from ../.env via env_file — add/change values there, no edits needed here.
+      # Everything else (MODEL_NAME, MAX_BATCH_SIZE, API_KEY, ...) comes from
+      # ../.env via env_file — add/change values there, no edits needed here.
     volumes:
       - model-cache:/home/modelapi/.cache/huggingface
       - ../models:/app/models
