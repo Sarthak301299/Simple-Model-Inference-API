@@ -1,0 +1,9 @@
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+python-dotenv>=1,<2
+python-multipart>=0.0.9,<1
+pillow>=10,<13
+prometheus-client>=0.20,<1
+requests>=2,<3
+transformers>=4.40,<5
+safetensors>=0.4,<1

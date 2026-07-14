@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Simple Model Inference API
 # Stage 1: Builder - Install dependencies and prepare Python environment
-FROM python:3.14-slim AS builder
+FROM python:3.12-slim AS builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -19,12 +19,13 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY requirements/ ./requirements
+ARG REQUIREMENTS_FILE=requirements/cpu.txt
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt
+    pip install -r ${REQUIREMENTS_FILE}
 
 # Stage 2: Runtime - Minimal image with only necessary dependencies
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

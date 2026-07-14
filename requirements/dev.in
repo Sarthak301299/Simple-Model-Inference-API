@@ -1,0 +1,7 @@
+-r cpu.in
+
+pytest
+pytest-cov
+ruff
+black
+pyright

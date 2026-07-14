@@ -24,7 +24,7 @@ The application consists of three main components:
 
 ## Prerequisites
 
-- Python 3.14 or higher
+- Python 3.12 or higher
 - pip for dependency management
 - Optional: NVIDIA GPU with CUDA support for accelerated inference
 
@@ -32,27 +32,35 @@ The application consists of three main components:
 
 ### Local Development
 
-1. Clone the repository:
+Clone the repository:
 ```bash
 git clone <repository-url>
 cd Simple\ Model\ Inference\ API
 ```
 
-2. Create a virtual environment:
+Create a virtual environment:
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+Install dependencies:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements/cpu.txt
 ```
 
+### Dependency sets
+
+- `requirements/prod.txt`: API runtime dependencies excluding Torch backend selection.
+- `requirements/cpu.txt`: CPU inference runtime.
+- `requirements/cuda-cu126.txt`: CUDA 12.6 inference runtime.
+- `requirements/dev.txt`: test/lint/type-check dependencies.
+- `requirements/load.txt`: load-testing dependencies.
 4. Create a `.env` file for configuration (optional):
 ```bash
 # .env file example
 MODEL_NAME=microsoft/resnet-50
+# Change to cuda for GPU
 INFERENCE_DEVICE=cpu
 API_PORT=8000
 DEBUG=false
@@ -63,12 +71,24 @@ LOG_LEVEL=INFO
 
 Build the Docker image:
 ```bash
-docker build -f docker/Dockerfile -t simple-model-inference-api:latest .
+docker build -f docker/Dockerfile -t simple-model-inference-api:cpu .
+```
+Build the Docker image for CUDA 12.6:
+
+```bash
+docker build -f docker/Dockerfile \
+--build-arg REQUIREMENTS_FILE=requirements/cuda-cu126.txt \
+-t simple-model-inference-api:cu126 .
 ```
 
-Run with Docker Compose:
+Run with Docker Compose (CPU):
 ```bash
-docker-compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml up --build
+```
+
+Run with Docker Compose (GPU):
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up --build
 ```
 
 ## Running the Application

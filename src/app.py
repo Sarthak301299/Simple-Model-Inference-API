@@ -154,7 +154,7 @@ def startup_check() -> JSONResponse:
 
     # The service is still starting until the model has been loaded.
     engine = getattr(app.state, "inf_engine", None)
-    if not engine or not engine.ready:
+    if not engine or not engine.ready or not engine.manager.model_loaded:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "not ready", "detail": "Initializing Inference Engine"},

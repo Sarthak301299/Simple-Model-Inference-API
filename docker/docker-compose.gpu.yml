@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  model-api:
+    image: simple-model-inference-api:cu126
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        REQUIREMENTS_FILE: requirements/cuda-cu126.txt
+    container_name: simple-model-inference-api-container
+    ports:
+      - "8000:8000"
+    environment:
+      - INFERENCE_DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
