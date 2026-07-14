@@ -1,9 +1,9 @@
 import asyncio
 import io
 from types import SimpleNamespace
-
+import queue
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile, Request
 
 import app as app_module
 
@@ -25,14 +25,16 @@ def reset_app_state():
 
 def test_handle_predict_request_rejects_shutdown_and_non_image():
     file = UploadFile(filename="image.jpg", file=io.BytesIO(b"dummy"))
+    request = Request(scope={"type": "http", "headers": []})
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request(file))
+        asyncio.run(app_module.handle_predict_request(request, file))
     assert exc_info.value.status_code == 503
 
-    app_module.app.state.inf_engine = SimpleNamespace(ready=True)
+    app_module.app.state.inf_engine = SimpleNamespace(ready=True, inference_queue=queue.Queue())
+    app_module.app.state.config = SimpleNamespace(MODEL_NAME="microsoft/resnet-50",INFERENCE_DEVICE="cpu",MAX_FILE_SIZE_MB=16)
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request(file))
+        asyncio.run(app_module.handle_predict_request(request, file))
     assert exc_info.value.status_code == 400
 
 

@@ -15,7 +15,6 @@ def test_default_config_values(monkeypatch):
         "API_PORT",
         "API_VERSION",
         "DEBUG",
-        "TIMEOUT",
         "MAX_CONTENT_LENGTH",
         "LOG_LEVEL",
         "LOG_FORMAT",
@@ -37,7 +36,6 @@ def test_default_config_values(monkeypatch):
     assert config.API_PORT == 8000
     assert config.API_VERSION == "1.0.0"
     assert config.DEBUG is False
-    assert config.TIMEOUT == 30
     assert config.MAX_CONTENT_LENGTH == 16 * 1024 * 1024
     assert config.LOG_LEVEL == "INFO"
     assert config.LOG_FORMAT == "json"
@@ -62,7 +60,6 @@ def test_env_overrides_and_parsing(monkeypatch):
         "API_PORT": "12345",
         "API_VERSION": "2.0.0",
         "DEBUG": "True",
-        "TIMEOUT": "60",
         "MAX_CONTENT_LENGTH": "1024",
         "LOG_LEVEL": "DEBUG",
         "LOG_FORMAT": "text",
@@ -88,7 +85,6 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.API_PORT == 12345
     assert config.API_VERSION == env["API_VERSION"]
     assert config.DEBUG is True
-    assert config.TIMEOUT == 60
     assert config.MAX_CONTENT_LENGTH == 1024
     assert config.LOG_LEVEL == env["LOG_LEVEL"]
     assert config.LOG_FORMAT == env["LOG_FORMAT"]
@@ -112,11 +108,11 @@ def make_config(**overrides):
         "API_PORT": 8000,
         "API_VERSION": "1.0.0",
         "DEBUG": False,
-        "TIMEOUT": 30,
         "MAX_CONTENT_LENGTH": 1024,
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "json",
         "MAX_FILE_SIZE_MB": 16,
+        "MAX_CHUNK_SIZE_MB": 1,
         "MAX_IMAGE_DIMENSIONS": (100, 100),
         "MODEL_INPUT_SHAPE": (1, 3, 224, 224),
         "TOP_K_PREDICTIONS": 5,
@@ -124,6 +120,7 @@ def make_config(**overrides):
         "MAX_CONCURRENT_REQUESTS": 256,
         "MAX_BATCH_SIZE": 32,
         "BATCHING_TIMEOUT_MS": 3,
+        "API_RETRY": 5,
     }
     return Config(**{**defaults, **overrides})
 
@@ -152,11 +149,11 @@ def test_validate_accepts_valid_config():
         {"API_KEY": 12345},
         {"API_PORT": 0},
         {"DEBUG": "yes"},
-        {"TIMEOUT": 0},
         {"MAX_CONTENT_LENGTH": 0},
         {"LOG_LEVEL": "VERBOSE"},
         {"LOG_FORMAT": "xml"},
         {"MAX_FILE_SIZE_MB": 0},
+        {"MAX_CHUNK_SIZE_MB": 32},
         {"MAX_IMAGE_DIMENSIONS": (0, 100)},
         {"MODEL_INPUT_SHAPE": (1, 3, 0, 224)},
         {"TOP_K_PREDICTIONS": 0, "MAX_TOP_K_PREDICTIONS": 10},
@@ -165,6 +162,7 @@ def test_validate_accepts_valid_config():
         {"MAX_CONCURRENT_REQUESTS": 512},
         {"MAX_BATCH_SIZE": 128},
         {"BATCHING_TIMEOUT_MS": 10},
+        {"API_RETRY": 0},
     ],
 )
 def test_validate_rejects_invalid_configurations(kwargs):

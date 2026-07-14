@@ -161,7 +161,7 @@ def test_methods_raise_if_not_loaded():
     with pytest.raises(ValueError):
         manager.preprocess_inputs(img)
     with pytest.raises(ValueError):
-        manager.predict([torch.zeros(1, 3, 224, 224)])
+        manager.predict(torch.zeros(1, 3, 224, 224))
     with pytest.raises(ValueError):
         manager.top_k_from_logits(torch.zeros(1, 3), k=1)
 

@@ -2,6 +2,7 @@ import asyncio
 import io
 from types import SimpleNamespace
 from PIL import Image
+import torch
 from inference_engine import InferenceEngine
 
 
@@ -21,6 +22,7 @@ def test_init_model_initializes_and_loads_model(monkeypatch):
     FakeConfig = SimpleNamespace(
         MODEL_NAME="microsoft/resnet-50",
         INFERENCE_DEVICE="cpu",
+        MAX_CONCURRENT_REQUESTS=256
     )
 
     monkeypatch.setattr("inference_engine.ModelManager", FakeModelManager)
@@ -45,7 +47,7 @@ def test_perform_inference_processes_uploaded_image_bytes(monkeypatch):
             self.model_loaded = True
 
         def preprocess_inputs(self, images):
-            return [images]
+            return torch.randn(1, 3, 224,224)
 
         def predict(self, processed_inputs):
             return [processed_inputs], 12.42
@@ -58,7 +60,7 @@ def test_perform_inference_processes_uploaded_image_bytes(monkeypatch):
     image.save(buffer, format="JPEG")
 
     FakeConfig = SimpleNamespace(
-        MODEL_NAME="microsoft/resnet-50", INFERENCE_DEVICE="cpu", TOP_K_PREDICTIONS=1
+        MODEL_NAME="microsoft/resnet-50", INFERENCE_DEVICE="cpu", TOP_K_PREDICTIONS=1, MAX_CONCURRENT_REQUESTS=256
     )
     FakeLoop = asyncio.new_event_loop()
     FakeFuture = FakeLoop.create_future()

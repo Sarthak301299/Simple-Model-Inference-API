@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
 from typing import Optional, Tuple, cast
+from PIL import Image
 
 
 @dataclass
@@ -21,11 +22,11 @@ class Config:
     API_PORT: int = 8000
     API_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    TIMEOUT: int = 30
     MAX_CONTENT_LENGTH: int = 16 * 1024 * 1024
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
     MAX_FILE_SIZE_MB: int = 16
+    MAX_CHUNK_SIZE_MB: int = 1
     MAX_IMAGE_DIMENSIONS: Tuple[int, int] = (4096, 4096)
     MODEL_INPUT_SHAPE: Tuple[Optional[int], int, int, int] = (None, 3, 224, 224)
     TOP_K_PREDICTIONS: int = 5
@@ -33,6 +34,7 @@ class Config:
     MAX_CONCURRENT_REQUESTS: int = 256
     MAX_BATCH_SIZE: int = 64
     BATCHING_TIMEOUT_MS: int = 3
+    API_RETRY: int = 5
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -48,13 +50,13 @@ class Config:
         api_port = int(os.getenv("API_PORT", cls.API_PORT))
         api_version = os.getenv("API_VERSION", cls.API_VERSION)
         debug = os.getenv("DEBUG", str(cls.DEBUG)).lower() in ("true", "1", "yes")
-        timeout = int(os.getenv("TIMEOUT", cls.TIMEOUT))
         max_content_length = int(
             os.getenv("MAX_CONTENT_LENGTH", cls.MAX_CONTENT_LENGTH)
         )
         log_level = os.getenv("LOG_LEVEL", cls.LOG_LEVEL)
         log_format = os.getenv("LOG_FORMAT", cls.LOG_FORMAT)
         max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", cls.MAX_FILE_SIZE_MB))
+        max_chunk_size_mb = int(os.getenv("MAX_CHUNK_SIZE_MB", cls.MAX_CHUNK_SIZE_MB))
         max_image_dimensions = cast(
             Tuple[int, int],
             (
@@ -90,6 +92,7 @@ class Config:
         batching_timeout_ms = int(
             os.getenv("BATCHING_TIMEOUT_MS", cls.BATCHING_TIMEOUT_MS)
         )
+        api_retry = int(os.getenv("API_RETRY", cls.API_RETRY))
 
         config = cls(
             MODEL_NAME=model_name,
@@ -100,11 +103,11 @@ class Config:
             API_PORT=api_port,
             API_VERSION=api_version,
             DEBUG=debug,
-            TIMEOUT=timeout,
             MAX_CONTENT_LENGTH=max_content_length,
             LOG_LEVEL=log_level,
             LOG_FORMAT=log_format,
             MAX_FILE_SIZE_MB=max_file_size_mb,
+            MAX_CHUNK_SIZE_MB=max_chunk_size_mb,
             MAX_IMAGE_DIMENSIONS=max_image_dimensions,
             MODEL_INPUT_SHAPE=model_input_shape,
             TOP_K_PREDICTIONS=top_k_predictions,
@@ -112,6 +115,7 @@ class Config:
             MAX_CONCURRENT_REQUESTS=max_concurrent_requests,
             MAX_BATCH_SIZE=max_batch_size,
             BATCHING_TIMEOUT_MS=batching_timeout_ms,
+            API_RETRY=api_retry,
         )
 
         cls.validate(config)
@@ -141,8 +145,6 @@ class Config:
             raise ValueError("API_PORT must be an integer between 1 and 65535.")
         if not isinstance(config.DEBUG, bool):
             raise ValueError("DEBUG must be a boolean value.")
-        if config.TIMEOUT <= 0:
-            raise ValueError("TIMEOUT must be a positive integer.")
         if config.MAX_CONTENT_LENGTH <= 0:
             raise ValueError("MAX_CONTENT_LENGTH must be a positive integer.")
         if config.LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -153,6 +155,10 @@ class Config:
             raise ValueError('LOG_FORMAT must be either "json" or "text".')
         if config.MAX_FILE_SIZE_MB <= 0:
             raise ValueError("MAX_FILE_SIZE_MB must be a positive integer.")
+        if not (0 < config.MAX_CHUNK_SIZE_MB <= config.MAX_FILE_SIZE_MB):
+            raise ValueError(
+                "MAX_CHUNK_SIZE_MB must be a positive integer less than or equal to MAX_FILE_SIZE_MB"
+            )
         if len(config.MAX_IMAGE_DIMENSIONS) != 2 or any(
             d <= 0 for d in config.MAX_IMAGE_DIMENSIONS
         ):
@@ -185,6 +191,10 @@ class Config:
             raise ValueError(
                 "BATCHING_TIMEOUT_MS must be a positive integer less than or equal to 5."
             )
+        if not (0 < config.API_RETRY <= 60):
+            raise ValueError(
+                "API_RETRY must be a positive integer less than or equal to 60."
+            )
 
     def to_dict(self) -> dict:
         """Convert the configuration parameters to a dictionary for easy access and manipulation."""
@@ -197,11 +207,11 @@ class Config:
             "API_PORT": self.API_PORT,
             "API_VERSION": self.API_VERSION,
             "DEBUG": self.DEBUG,
-            "TIMEOUT": self.TIMEOUT,
             "MAX_CONTENT_LENGTH": self.MAX_CONTENT_LENGTH,
             "LOG_LEVEL": self.LOG_LEVEL,
             "LOG_FORMAT": self.LOG_FORMAT,
             "MAX_FILE_SIZE_MB": self.MAX_FILE_SIZE_MB,
+            "MAX_CHUNK_SIZE_MB": self.MAX_CHUNK_SIZE_MB,
             "MAX_IMAGE_DIMENSIONS": self.MAX_IMAGE_DIMENSIONS,
             "MODEL_INPUT_SHAPE": self.MODEL_INPUT_SHAPE,
             "TOP_K_PREDICTIONS": self.TOP_K_PREDICTIONS,
@@ -209,7 +219,11 @@ class Config:
             "MAX_CONCURRENT_REQUESTS": self.MAX_CONCURRENT_REQUESTS,
             "MAX_BATCH_SIZE": self.MAX_BATCH_SIZE,
             "BATCHING_TIMEOUT_MS": self.BATCHING_TIMEOUT_MS,
+            "API_RETRY": self.API_RETRY,
         }
+
+    def validate_image(self, image: Image.Image, max_dims: Tuple[int, int]) -> bool:
+        return (0 < image.width <= max_dims[0]) and (0 < image.height <= max_dims[1])
 
     def __str__(self) -> str:
         """Return a string representation of the configuration parameters for easy logging and debugging."""

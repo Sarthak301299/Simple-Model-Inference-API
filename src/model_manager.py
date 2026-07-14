@@ -8,7 +8,7 @@ import time
 import torch
 import gc
 from transformers import AutoModelForImageClassification, AutoImageProcessor
-from typing import Any, Dict, List, Tuple, Sequence
+from typing import Any, Dict, List, Tuple
 from PIL import Image
 
 logging.basicConfig(
@@ -109,7 +109,7 @@ class ModelManager:
 
     def preprocess_inputs(
         self, inputs: Image.Image | List[Image.Image] | None = None
-    ) -> Sequence[torch.Tensor]:
+    ) -> torch.Tensor:
         """
         Convert PIL image(s) into model-ready tensors.
 
@@ -135,13 +135,13 @@ class ModelManager:
 
         # Use the AutoImageProcessor to prepare tensors and move to device
         logger.debug("Preprocessing %d image(s)", len(inputs))
-        processed_inputs: Sequence[torch.Tensor] = self.image_processor(
+        processed_inputs: torch.Tensor = self.image_processor(
             inputs, return_tensors="pt"
         )["pixel_values"].to(self.device)
         logger.debug("Preprocessing completed for %d image(s)", len(inputs))
         return processed_inputs
 
-    def predict(self, inputs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, float]:
+    def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, float]:
         """
         Run the model forward pass and return logits.
 

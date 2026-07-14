@@ -3,6 +3,7 @@ import threading
 import asyncio
 import logging
 import time
+import torch
 from PIL import Image
 from typing import Tuple, List
 from config import Config
@@ -14,14 +15,35 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def safely_fail_future(
+    f: asyncio.Future[Tuple[List[Tuple[str, float]], float]], err: Exception
+) -> None:
+    try:
+        f.set_exception(RuntimeError(f"Inference Proceedure Failed Exception {err}"))
+    except asyncio.InvalidStateError:
+        pass
+
+
+def safely_set_result(
+    f: asyncio.Future[Tuple[List[Tuple[str, float]], float]],
+    res: Tuple[List[Tuple[str, float]], float],
+) -> None:
+    try:
+        f.set_result(res)
+    except asyncio.InvalidStateError:
+        pass
+
+
 class InferenceEngine:
     def __init__(self, config: Config):
-        self.config = config
-        self.ready = False
-        self.inference_queue = queue.Queue()
-        self.shutdown_event = threading.Event()
+        self.config: Config = config
+        self.ready: bool = False
+        self.inference_queue: queue.Queue = queue.Queue(
+            maxsize=self.config.MAX_CONCURRENT_REQUESTS
+        )
+        self.shutdown_event: threading.Event = threading.Event()
         self.init_model_manager()
-        self.inference_thread = threading.Thread(
+        self.inference_thread: threading.Thread = threading.Thread(
             target=self.batch_processing_loop, daemon=True
         )
         self.inference_thread.start()
@@ -55,7 +77,12 @@ class InferenceEngine:
         future: asyncio.Future[Tuple[List[Tuple[str, float]], float]] = (
             loop.create_future()
         )
-        self.inference_queue.put((image, loop, future))
+        try:
+            self.inference_queue.put_nowait((image, loop, future))
+        except queue.Full:
+            logger.error("Failed to enqueue request.")
+            del future
+            raise queue.Full()
         return future
 
     def perform_inference(
@@ -64,9 +91,24 @@ class InferenceEngine:
         loops: List[asyncio.AbstractEventLoop],
         futures: List[asyncio.Future[Tuple[List[Tuple[str, float]], float]]],
     ) -> Tuple[List[List[Tuple[str, float]]], float] | None:
-        """Read image bytes, run inference, and return top-k predictions."""
+        """Read image bytes, run inference, and return top-k predictions, isolating failures where possible."""
+        valid_tensors: List[torch.Tensor] = []  # each a (1,C,H,W) tensor
+        valid_positions: List[int] = []
+        for i, img in enumerate(image_batch):
+            try:
+                tensor = self.manager.preprocess_inputs(img)
+            except Exception as e:
+                loops[i].call_soon_threadsafe(safely_fail_future, futures[i], e)
+                continue
+            valid_tensors.append(tensor)
+            valid_positions.append(i)
+
+        if not valid_tensors:
+            assert all(f.done() for f in futures)
+            return None
+
         try:
-            processed_image_batch = self.manager.preprocess_inputs(image_batch)
+            processed_image_batch = torch.cat(valid_tensors, dim=0)
             logits, inference_time_ms = self.manager.predict(processed_image_batch)
             output = self.manager.top_k_from_logits(
                 logits, self.config.TOP_K_PREDICTIONS
@@ -74,23 +116,7 @@ class InferenceEngine:
         except Exception as e:
             for loop, future in zip(loops, futures):
                 try:
-
-                    def safely_fail_future(
-                        f: asyncio.Future[
-                            Tuple[List[Tuple[str, float]], float]
-                        ] = future,
-                        err: Exception = e,
-                    ) -> None:
-                        try:
-                            f.set_exception(
-                                RuntimeError(
-                                    f"Inference Proceedure Failed Exception {err}"
-                                )
-                            )
-                        except asyncio.InvalidStateError:
-                            pass
-
-                    loop.call_soon_threadsafe(safely_fail_future)
+                    loop.call_soon_threadsafe(safely_fail_future, future, e)
                 except Exception:
                     continue
             return None
@@ -124,10 +150,8 @@ class InferenceEngine:
                         "Inference Loop received termination signal. Exiting Loop."
                     )
                     break
-                if (
-                    first_item[0] is None
-                    or first_item[0].size[0] == 0
-                    or first_item[0].size[1] == 0
+                if first_item[0] is None or not self.config.validate_image(
+                    first_item[0], self.config.MAX_IMAGE_DIMENSIONS
                 ):
                     first_item[1].call_soon_threadsafe(
                         first_item[2].set_exception,
@@ -160,7 +184,9 @@ class InferenceEngine:
                         )
                         self.inference_queue.put(None)
                         break
-                    if item[0] is None or item[0].size[0] == 0 or item[0].size[1] == 0:
+                    if item[0] is None or not self.config.validate_image(
+                        item[0], self.config.MAX_IMAGE_DIMENSIONS
+                    ):
                         item[1].call_soon_threadsafe(
                             item[2].set_exception,
                             ValueError("Invalid Image Dimensions."),
@@ -177,19 +203,7 @@ class InferenceEngine:
                 for i, (_, loop, future) in enumerate(batch):
                     try:
                         result = (topkoutputs[i], inference_time_ms)
-
-                        def safely_set_result(
-                            f: asyncio.Future[
-                                Tuple[List[Tuple[str, float]], float]
-                            ] = future,
-                            res: Tuple[List[Tuple[str, float]], float] = result,
-                        ) -> None:
-                            try:
-                                f.set_result(res)
-                            except asyncio.InvalidStateError:
-                                pass
-
-                        loop.call_soon_threadsafe(safely_set_result)
+                        loop.call_soon_threadsafe(safely_set_result, future, result)
                     except Exception:
                         continue
         logger.info("Dynamic Batching Loop terminating cleanly")
@@ -197,7 +211,16 @@ class InferenceEngine:
     def shutdown(self):
         logger.info("Inference Engine: Initiating graceful shutdown")
         self.shutdown_event.set()
-        self.inference_queue.put(None)
+        try:
+            self.inference_queue.put(None, timeout=2.0)
+        except queue.Full:
+            logger.warning(
+                "Inference queue is full, unable to enqueue sentinel. Worker will exit via shutdown_event poll."
+            )
         self.inference_thread.join(timeout=5.0)
+        if self.inference_thread.is_alive():
+            logger.error(
+                "Inference worker thread did not terminate within timeout. Exiting with potential leaks."
+            )
         self.manager.cleanup_model()
         logger.info("Inference Engine: Shutdown complete")

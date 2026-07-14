@@ -2,12 +2,23 @@
 An FastAPI application that serves as an API for inference on an Image Classification model. The application should be able to handle
 """
 
-from fastapi import FastAPI, HTTPException, status, UploadFile, File
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    status,
+    UploadFile,
+    Request,
+    File,
+    Header,
+    Depends,
+)
 from fastapi.responses import JSONResponse
 from PIL import Image
 from contextlib import asynccontextmanager
 import logging
 import io
+import queue
+import hmac
 from config import Config
 from inference_engine import InferenceEngine
 from collections.abc import AsyncGenerator
@@ -17,6 +28,22 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+async def read_with_limits(file: UploadFile, max_bytes: int) -> bytes:
+    chunk_size = app.state.config.MAX_CHUNK_SIZE_MB * 1024 * 1024
+    data = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"File exceeds maximum allowed size of {max_bytes} bytes",
+            )
+    return bytes(data)
 
 
 @asynccontextmanager
@@ -101,7 +128,18 @@ def startup_check() -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
 
 
-@app.get("/info")
+async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    expected = app.state.config.API_KEY
+    if expected is None:
+        return
+    if x_api_key is None or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
+
+
+@app.get("/info", dependencies=[Depends(verify_api_key)])
 async def info() -> JSONResponse:
     engine = getattr(app.state, "inf_engine", None)
     if not engine or not engine.ready:
@@ -114,12 +152,13 @@ async def info() -> JSONResponse:
     )
 
 
-@app.post("/predict")
+@app.post("/predict", dependencies=[Depends(verify_api_key)])
 async def handle_predict_request(
+    request: Request,
     file: UploadFile = File(...),
 ) -> Dict[str, List[Tuple[str, float]] | float]:
     """Enqueue an inference request and await the resulting predictions."""
-    engine = getattr(app.state, "inf_engine", None)
+    engine: InferenceEngine | None = getattr(app.state, "inf_engine", None)
     if not engine or not engine.ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -131,17 +170,50 @@ async def handle_predict_request(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Target"
         )
 
-    # Create a ticket that will receive the prediction result from the inference engine.
+    if engine.inference_queue.full():
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Inference Queue is full",
+            headers={"Retry-After": str(app.state.config.API_RETRY)},
+        )
+
+    max_bytes = app.state.config.MAX_FILE_SIZE_MB * 1024 * 1024
+    content_length = request.headers.get("content-length")
+    if content_length is not None and int(content_length) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds maximum allowed size of {max_bytes} bytes",
+        )
+
     try:
-        img_bytes = await file.read()
+        img_bytes = await read_with_limits(file, max_bytes)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid file format: {str(e)}",
         )
 
-    result: Tuple[List[Tuple[str, float]], float] = await engine.EnqueueRequest(image)
+    if not app.state.config.validate_image(
+        image, app.state.config.MAX_IMAGE_DIMENSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Image dimensions {image.size} are non-positive or exceed the maximum allowed {(app.state.config.MAX_IMAGE_DIMENSIONS[0], app.state.config.MAX_IMAGE_DIMENSIONS[1])}",
+        )
+
+    try:
+        result: Tuple[List[Tuple[str, float]], float] = await engine.EnqueueRequest(
+            image
+        )
+    except queue.Full:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Inference Queue is full",
+            headers={"Retry-After": str(app.state.config.API_RETRY)},
+        )
     return {"prediction": result[0], "inference_time_ms": result[1]}
 
 
