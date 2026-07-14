@@ -46,8 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create non-root user for security
 RUN useradd -m -u 1000 modelapi && \
-    mkdir -p /app /app/models && \
-    chown -R modelapi:modelapi /app
+    mkdir -p /app /app/models /home/modelapi/.cache/huggingface && \
+    chown -R modelapi:modelapi /app /home/modelapi
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
