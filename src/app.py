@@ -132,7 +132,7 @@ async def readyness_check() -> JSONResponse:
     """Report whether the application is ready to accept inference requests."""
 
     engine = getattr(app.state, "inf_engine", None)
-    if not engine or not engine.ready:
+    if not engine or not engine.ready or not engine.manager.model_loaded:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "not ready", "detail": "Initializing Inference Engine"},
@@ -142,7 +142,7 @@ async def readyness_check() -> JSONResponse:
     if engine.inference_queue.full():
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "ready", "detail": "Inference Queue Saturated"},
+            content={"status": "not ready", "detail": "Inference Queue Saturated"},
         )
 
     return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})

@@ -24,7 +24,7 @@ services:
       - ./models:/app/models
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health/live', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

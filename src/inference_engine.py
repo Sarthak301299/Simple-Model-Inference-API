@@ -56,7 +56,9 @@ class InferenceEngine:
         # Read the current configuration and create a model manager for the selected backend.
         try:
             self.manager = ModelManager(
-                self.config.MODEL_NAME, self.config.INFERENCE_DEVICE
+                self.config.MODEL_NAME,
+                self.config.INFERENCE_DEVICE,
+                self.config.MODEL_PATH,
             )
         except Exception as e:
             logger.error(
@@ -93,7 +95,7 @@ class InferenceEngine:
         image_batch: List[Image.Image],
         loops: List[asyncio.AbstractEventLoop],
         futures: List[asyncio.Future[Tuple[List[Tuple[str, float]], float]]],
-    ) -> Tuple[List[List[Tuple[str, float]]], float] | None:
+    ) -> None:
         """Read image bytes, run inference, and return top-k predictions, isolating failures where possible."""
         valid_tensors: List[torch.Tensor] = []  # each a (1,C,H,W) tensor
         valid_positions: List[int] = []
@@ -117,13 +119,20 @@ class InferenceEngine:
                 logits, self.config.TOP_K_PREDICTIONS
             )
         except Exception as e:
-            for loop, future in zip(loops, futures):
+            for pos in valid_positions:
                 try:
-                    loop.call_soon_threadsafe(safely_fail_future, future, e)
+                    loops[pos].call_soon_threadsafe(safely_fail_future, futures[pos], e)
                 except Exception:
                     continue
             return None
-        return output, inference_time_ms
+
+        INFERENCE_LATENCY.observe(inference_time_ms / 1000)
+        for local_i, pos in enumerate(valid_positions):
+            result = (output[local_i], inference_time_ms)
+            try:
+                loops[pos].call_soon_threadsafe(safely_set_result, futures[pos], result)
+            except Exception:
+                continue
 
     def batch_processing_loop(self) -> None:
         """Continuously collect queued requests into batches and dispatch inference work."""
@@ -200,18 +209,11 @@ class InferenceEngine:
                 except queue.Empty:
                     break
 
+            if not batch:
+                continue
             BATCH_SIZE.observe(len(batch))
             batch_inputs, loops, futures = map(list, zip(*batch))
-            infout = self.perform_inference(batch_inputs, loops, futures)
-            if infout is not None:
-                topkoutputs, inference_time_ms = infout
-                INFERENCE_LATENCY.observe(inference_time_ms / 1000)
-                for i, (_, loop, future) in enumerate(batch):
-                    try:
-                        result = (topkoutputs[i], inference_time_ms)
-                        loop.call_soon_threadsafe(safely_set_result, future, result)
-                    except Exception:
-                        continue
+            self.perform_inference(batch_inputs, loops, futures)
         logger.info("Dynamic Batching Loop terminating cleanly")
 
     def shutdown(self):
