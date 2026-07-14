@@ -2,10 +2,11 @@ version: '3.8'
 
 services:
   model-api:
+    image: simple-model-inference-api
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: simple-model-inference-api
+    container_name: simple-model-inference-api-container
     ports:
       - "8000:8000"
     environment:

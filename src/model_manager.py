@@ -11,6 +11,9 @@ from transformers import AutoModelForImageClassification, AutoImageProcessor
 from typing import Any, Dict, List, Tuple, Sequence
 from PIL import Image
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -105,16 +108,16 @@ class ModelManager:
         logger.info("Model %s loaded successfully", self.model_name)
 
     def preprocess_inputs(
-        self, inputs: Image.Image | Sequence[Image.Image] | None = None
+        self, inputs: Image.Image | List[Image.Image] | None = None
     ) -> Sequence[torch.Tensor]:
         """
         Convert PIL image(s) into model-ready tensors.
 
         Args:
-            inputs: A single `PIL.Image` or a sequence of `PIL.Image` objects.
+            inputs: A single `PIL.Image` or a list of `PIL.Image` objects.
 
         Returns:
-            A sequence of `torch.Tensor` values on  containing processed pixel values loaded on the device.
+            A list of `torch.Tensor` values on  containing processed pixel values loaded on the device.
         """
         if not self.model_loaded:
             raise ValueError(
@@ -126,27 +129,16 @@ class ModelManager:
         # Normalize to a sequence of images
         if isinstance(inputs, Image.Image):
             inputs = [inputs]
-        elif not isinstance(inputs, Sequence):
-            raise TypeError("Input must be an image or a sequence of images.")
 
         if len(inputs) == 0:
             raise ValueError("Input image sequence must not be empty")
 
-        # Validate and ensure RGB mode for every image
-        normalized: List[Image.Image] = []
-        for element in inputs:
-            if not isinstance(element, Image.Image):
-                raise TypeError(
-                    "All elements in the input sequence must be PIL.Image instances."
-                )
-            normalized.append(element.convert("RGB"))
-
         # Use the AutoImageProcessor to prepare tensors and move to device
-        logger.debug("Preprocessing %d image(s)", len(normalized))
+        logger.debug("Preprocessing %d image(s)", len(inputs))
         processed_inputs: Sequence[torch.Tensor] = self.image_processor(
-            normalized, return_tensors="pt"
+            inputs, return_tensors="pt"
         )["pixel_values"].to(self.device)
-        logger.debug("Preprocessing completed for %d image(s)", len(normalized))
+        logger.debug("Preprocessing completed for %d image(s)", len(inputs))
         return processed_inputs
 
     def predict(self, inputs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, float]:
@@ -159,8 +151,6 @@ class ModelManager:
         Returns:
             A `torch.Tensor` of logits with shape (batch_size, num_classes) and the inference time.
         """
-        if inputs is None:
-            raise TypeError("Input tensors are not provided")
 
         if not self.model_loaded:
             raise ValueError(
@@ -230,9 +220,10 @@ class ModelManager:
 
     def cleanup_model(self) -> None:
         if self.model_loaded:
-            self.model = None
-            self.image_processor = None
+            del self.model
+            del self.image_processor
             self.model_loaded = False
             gc.collect()
             if self.device == torch.device("cuda"):
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()

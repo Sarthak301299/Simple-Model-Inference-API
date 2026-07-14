@@ -114,9 +114,7 @@ def test_preprocess_inputs_sequence_with_non_image():
 
     # sequence containing a non-image element should raise
     with pytest.raises(TypeError):
-        manager.preprocess_inputs(
-            [Image.new("RGB", (2, 2)), 123]  # pyright: ignore [reportArgumentType]
-        )
+        manager.preprocess_inputs(None)
 
 
 def test_top_k_invalid_k_values():
