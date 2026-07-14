@@ -15,7 +15,6 @@ def test_default_config_values(monkeypatch):
         "API_PORT",
         "API_VERSION",
         "DEBUG",
-        "MAX_CONTENT_LENGTH",
         "LOG_LEVEL",
         "LOG_FORMAT",
         "MAX_FILE_SIZE_MB",
@@ -36,7 +35,6 @@ def test_default_config_values(monkeypatch):
     assert config.API_PORT == 8000
     assert config.API_VERSION == "1.0.0"
     assert config.DEBUG is False
-    assert config.MAX_CONTENT_LENGTH == 16 * 1024 * 1024
     assert config.LOG_LEVEL == "INFO"
     assert config.LOG_FORMAT == "json"
     assert config.MAX_FILE_SIZE_MB == 16
@@ -60,7 +58,6 @@ def test_env_overrides_and_parsing(monkeypatch):
         "API_PORT": "12345",
         "API_VERSION": "2.0.0",
         "DEBUG": "True",
-        "MAX_CONTENT_LENGTH": "1024",
         "LOG_LEVEL": "DEBUG",
         "LOG_FORMAT": "text",
         "MAX_FILE_SIZE_MB": "32",
@@ -85,7 +82,6 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.API_PORT == 12345
     assert config.API_VERSION == env["API_VERSION"]
     assert config.DEBUG is True
-    assert config.MAX_CONTENT_LENGTH == 1024
     assert config.LOG_LEVEL == env["LOG_LEVEL"]
     assert config.LOG_FORMAT == env["LOG_FORMAT"]
     assert config.MAX_FILE_SIZE_MB == 32
@@ -108,7 +104,6 @@ def make_config(**overrides):
         "API_PORT": 8000,
         "API_VERSION": "1.0.0",
         "DEBUG": False,
-        "MAX_CONTENT_LENGTH": 1024,
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "json",
         "MAX_FILE_SIZE_MB": 16,
@@ -149,7 +144,6 @@ def test_validate_accepts_valid_config():
         {"API_KEY": 12345},
         {"API_PORT": 0},
         {"DEBUG": "yes"},
-        {"MAX_CONTENT_LENGTH": 0},
         {"LOG_LEVEL": "VERBOSE"},
         {"LOG_FORMAT": "xml"},
         {"MAX_FILE_SIZE_MB": 0},

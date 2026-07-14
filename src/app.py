@@ -105,7 +105,7 @@ async def readyness_check() -> JSONResponse:
         )
 
     # The queue should be able to accept more work before requests are routed.
-    if engine.inference_queue.qsize() > app.state.config.MAX_CONCURRENT_REQUESTS:
+    if engine.inference_queue.full():
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "ready", "detail": "Inference Queue Saturated"},
@@ -170,6 +170,7 @@ async def handle_predict_request(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Target"
         )
 
+    # A fast path check for the queue before any reads.
     if engine.inference_queue.full():
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -181,7 +182,7 @@ async def handle_predict_request(
     content_length = request.headers.get("content-length")
     if content_length is not None and int(content_length) > max_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds maximum allowed size of {max_bytes} bytes",
         )
 
@@ -204,6 +205,7 @@ async def handle_predict_request(
             detail=f"Image dimensions {image.size} are non-positive or exceed the maximum allowed {(app.state.config.MAX_IMAGE_DIMENSIONS[0], app.state.config.MAX_IMAGE_DIMENSIONS[1])}",
         )
 
+    # Another check before enqueuing to account for the queue filling up during read.
     try:
         result: Tuple[List[Tuple[str, float]], float] = await engine.EnqueueRequest(
             image

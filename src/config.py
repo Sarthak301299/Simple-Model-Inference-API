@@ -22,7 +22,6 @@ class Config:
     API_PORT: int = 8000
     API_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    MAX_CONTENT_LENGTH: int = 16 * 1024 * 1024
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
     MAX_FILE_SIZE_MB: int = 16
@@ -50,9 +49,6 @@ class Config:
         api_port = int(os.getenv("API_PORT", cls.API_PORT))
         api_version = os.getenv("API_VERSION", cls.API_VERSION)
         debug = os.getenv("DEBUG", str(cls.DEBUG)).lower() in ("true", "1", "yes")
-        max_content_length = int(
-            os.getenv("MAX_CONTENT_LENGTH", cls.MAX_CONTENT_LENGTH)
-        )
         log_level = os.getenv("LOG_LEVEL", cls.LOG_LEVEL)
         log_format = os.getenv("LOG_FORMAT", cls.LOG_FORMAT)
         max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", cls.MAX_FILE_SIZE_MB))
@@ -103,7 +99,6 @@ class Config:
             API_PORT=api_port,
             API_VERSION=api_version,
             DEBUG=debug,
-            MAX_CONTENT_LENGTH=max_content_length,
             LOG_LEVEL=log_level,
             LOG_FORMAT=log_format,
             MAX_FILE_SIZE_MB=max_file_size_mb,
@@ -145,8 +140,6 @@ class Config:
             raise ValueError("API_PORT must be an integer between 1 and 65535.")
         if not isinstance(config.DEBUG, bool):
             raise ValueError("DEBUG must be a boolean value.")
-        if config.MAX_CONTENT_LENGTH <= 0:
-            raise ValueError("MAX_CONTENT_LENGTH must be a positive integer.")
         if config.LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
             raise ValueError(
                 'LOG_LEVEL must be one of "DEBUG", "INFO", "WARNING", "ERROR", or "CRITICAL".'
@@ -207,7 +200,6 @@ class Config:
             "API_PORT": self.API_PORT,
             "API_VERSION": self.API_VERSION,
             "DEBUG": self.DEBUG,
-            "MAX_CONTENT_LENGTH": self.MAX_CONTENT_LENGTH,
             "LOG_LEVEL": self.LOG_LEVEL,
             "LOG_FORMAT": self.LOG_FORMAT,
             "MAX_FILE_SIZE_MB": self.MAX_FILE_SIZE_MB,
