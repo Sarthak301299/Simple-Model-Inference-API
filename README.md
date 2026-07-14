@@ -83,7 +83,7 @@ docker build -f docker/Dockerfile \
 
 Run the container:
 ```bash
-docker run --env-file .env -e API_HOST=0.0.0.0 API_PORT=8000 -p 8000:8000 simple-model-inference-api:cpu #Or :cu126
+docker run --env-file .env -e API_HOST=0.0.0.0 -e API_PORT=8000 -p 8000:8000 simple-model-inference-api:cpu #Or :cu126
 ```
 
 Run with Docker Compose (CPU):

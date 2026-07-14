@@ -12,18 +12,19 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
-      - MODEL_NAME=microsoft/resnet-50
-      - INFERENCE_DEVICE=cpu
+      # Container network topology — intentionally fixed, and takes precedence over
+      # env_file: a laptop-dev .env with API_HOST=localhost would otherwise make this
+      # container unreachable despite the published port mapping.
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - DEBUG=false
-      - LOG_LEVEL=INFO
-      - MAX_BATCH_SIZE=64
-      - BATCHING_TIMEOUT_MS=3
       - PYTHONPATH=/app/src
       - HF_HOME=/home/modelapi/.cache/huggingface
+      - INFERENCE_DEVICE=cpu
+      # Everything else (MODEL_NAME, INFERENCE_DEVICE, MAX_BATCH_SIZE, API_KEY, ...)
+      # comes from ../.env via env_file — add/change values there, no edits needed here.
     volumes:
       - model-cache:/home/modelapi/.cache/huggingface
       - ../models:/app/models
