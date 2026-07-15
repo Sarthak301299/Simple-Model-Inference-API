@@ -103,7 +103,6 @@ jobs:
       - name: Dump container logs
         if: always()
         run: docker logs smoke-test || true
-
       - name: Stop and remove smoke test container
         if: always()
         run: docker rm -f smoke-test || true
