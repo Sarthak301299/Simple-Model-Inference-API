@@ -58,6 +58,13 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build Docker Image
-        run: docker build -f docker/Dockerfile -t simple-model-inference-api:cpuci .
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: simple-model-inference-api:cpuci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
