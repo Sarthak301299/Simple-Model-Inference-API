@@ -283,7 +283,10 @@ def test_predict_rejects_invalid_content_length(content_length, exception, statu
         ready=True, inference_queue=queue.Queue()
     )
     request = Request(
-        scope={"type": "http", "headers": [(b"content-length", content_length.encode("utf-8"))]}
+        scope={
+            "type": "http",
+            "headers": [(b"content-length", content_length.encode("utf-8"))],
+        }
     )
     file = UploadFile(
         filename="x.png",
