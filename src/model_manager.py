@@ -220,8 +220,8 @@ class ModelManager:
 
     def cleanup_model(self) -> None:
         if self.model_loaded:
-            del self.model
-            del self.image_processor
+            self.model = None
+            self.image_processor = None
             self.model_loaded = False
             gc.collect()
             if self.device == torch.device("cuda"):

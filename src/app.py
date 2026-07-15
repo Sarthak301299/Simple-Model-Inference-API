@@ -20,12 +20,12 @@ import io
 import queue
 import hmac
 import time
-from config import Config
-from inference_engine import InferenceEngine
+from src.config import Config
+from src.inference_engine import InferenceEngine
 from collections.abc import AsyncGenerator
 from typing import List, Tuple, Dict, Callable
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
-from metrics import (
+from src.metrics import (
     REQUEST_COUNT,
     REQUEST_LATENCY,
     REJECTED_COUNT,
@@ -138,6 +138,15 @@ async def readyness_check() -> JSONResponse:
             content={"status": "not ready", "detail": "Initializing Inference Engine"},
         )
 
+    if engine.shutdown_event.is_set() or not engine.inference_thread.is_alive():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "not ready",
+                "detail": "Inference Engine is shutting down.",
+            },
+        )
+
     # The queue should be able to accept more work before requests are routed.
     if engine.inference_queue.full():
         return JSONResponse(
@@ -149,7 +158,7 @@ async def readyness_check() -> JSONResponse:
 
 
 @app.get("/health/startup")
-def startup_check() -> JSONResponse:
+async def startup_check() -> JSONResponse:
     """Report whether the application startup process has completed."""
 
     # The service is still starting until the model has been loaded.
@@ -158,6 +167,15 @@ def startup_check() -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "not ready", "detail": "Initializing Inference Engine"},
+        )
+
+    if engine.shutdown_event.is_set() or not engine.inference_thread.is_alive():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "not ready",
+                "detail": "Inference Engine is shutting down.",
+            },
         )
     return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ready"})
 

@@ -1,11 +1,129 @@
 import pytest
+from PIL import Image
+from src.config import Config
 
-from config import Config
+
+def make_config(**overrides):
+    """Create a minimal Config instance for validation tests with optional overrides."""
+    defaults = {
+        "MODEL_NAME": "microsoft/resnet-50",
+        "MODEL_PATH": None,
+        "INFERENCE_DEVICE": "cpu",
+        "API_HOST": "127.0.0.1",
+        "API_KEY": None,
+        "API_PORT": 8000,
+        "API_VERSION": "1.0.0",
+        "DEBUG": False,
+        "LOG_LEVEL": "INFO",
+        "LOG_FORMAT": "json",
+        "MAX_FILE_SIZE_MB": 16,
+        "MAX_CHUNK_SIZE_MB": 1,
+        "MAX_IMAGE_DIMENSIONS": (100, 100),
+        "MODEL_INPUT_SHAPE": (1, 3, 224, 224),
+        "TOP_K_PREDICTIONS": 5,
+        "MAX_TOP_K_PREDICTIONS": 10,
+        "MAX_CONCURRENT_REQUESTS": 256,
+        "MAX_BATCH_SIZE": 32,
+        "BATCHING_TIMEOUT_MS": 3,
+        "API_RETRY": 5,
+    }
+    return Config(**{**defaults, **overrides})
+
+
+@pytest.mark.parametrize(
+    "env_key,env_value",
+    [
+        ("API_PORT", "not-an-int"),
+        ("MAX_FILE_SIZE_MB", "not-an-int"),
+        ("MAX_IMAGE_DIMENSIONS", "1024,abc"),
+        ("MODEL_INPUT_SHAPE", "None,3,abc,224"),
+    ],
+)
+def test_from_env_rejects_malformed_numeric_values(monkeypatch, env_key, env_value):
+    monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
+    monkeypatch.setenv("INFERENCE_DEVICE", "cpu")
+    monkeypatch.setenv(env_key, env_value)
+
+    with pytest.raises(ValueError):
+        Config.from_env()
+
+
+@pytest.mark.parametrize(
+    "env_value,expected",
+    [
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+        ("false", False),
+        ("0", False),
+        ("no", False),
+    ],
+)
+def test_from_env_debug_boolean_parsing(monkeypatch, env_value, expected):
+    monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
+    monkeypatch.setenv("INFERENCE_DEVICE", "cpu")
+    monkeypatch.setenv("DEBUG", env_value)
+
+    assert Config.from_env().DEBUG is expected
+
+
+def test_from_env_parses_remaining_runtime_controls(monkeypatch):
+    monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
+    monkeypatch.setenv("INFERENCE_DEVICE", "cpu")
+    monkeypatch.setenv("MAX_CHUNK_SIZE_MB", "2")
+    monkeypatch.setenv("BATCHING_TIMEOUT_MS", "4")
+    monkeypatch.setenv("API_RETRY", "30")
+
+    config = Config.from_env()
+
+    assert config.MAX_CHUNK_SIZE_MB == 2
+    assert config.BATCHING_TIMEOUT_MS == 4
+    assert config.API_RETRY == 30
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"API_PORT": 1},
+        {"API_PORT": 65535},
+        {"MAX_TOP_K_PREDICTIONS": 100, "TOP_K_PREDICTIONS": 100},
+        {"MAX_CONCURRENT_REQUESTS": 256},
+        {"MAX_BATCH_SIZE": 64},
+        {"BATCHING_TIMEOUT_MS": 5},
+        {"API_RETRY": 60},
+    ],
+)
+def test_validate_accepts_boundary_values(kwargs):
+    Config.validate(make_config(**kwargs))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"MAX_IMAGE_DIMENSIONS": (100, "large")},
+        {"MODEL_INPUT_SHAPE": (None, 3, "wide", 224)},
+        {"MAX_CONCURRENT_REQUESTS": 0},
+        {"MAX_BATCH_SIZE": 0},
+        {"BATCHING_TIMEOUT_MS": 0},
+        {"API_RETRY": 61},
+    ],
+)
+def test_validate_rejects_additional_invalid_values(kwargs):
+    with pytest.raises((TypeError, ValueError)):
+        Config.validate(make_config(**kwargs))
+
+
+def test_validate_image_boundaries():
+    config = make_config(MAX_IMAGE_DIMENSIONS=(10, 20))
+
+    assert config.validate_image(Image.new("RGB", (10, 20)), (10, 20)) is True
+    assert config.validate_image(Image.new("RGB", (11, 20)), (10, 20)) is False
+    assert config.validate_image(Image.new("RGB", (10, 21)), (10, 20)) is False
 
 
 def test_default_config_values(monkeypatch):
     """Verify default Config values are loaded correctly when no environment variables are set."""
-    monkeypatch.setattr("config.load_dotenv", lambda path: True)
+    monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
     for env_var in [
         "MODEL_NAME",
         "MODEL_PATH",
@@ -48,7 +166,7 @@ def test_default_config_values(monkeypatch):
 
 def test_env_overrides_and_parsing(monkeypatch):
     """Verify Config reads and parses environment variables correctly, including type conversions."""
-    monkeypatch.setattr("config.load_dotenv", lambda path: True)
+    monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
     env = {
         "MODEL_NAME": "google/mobilenet_v2_1.4_224",
         "MODEL_PATH": "/tmp/model",
@@ -91,33 +209,6 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.MAX_TOP_K_PREDICTIONS == 8
     assert config.MAX_CONCURRENT_REQUESTS == 32
     assert config.MAX_BATCH_SIZE == 8
-
-
-def make_config(**overrides):
-    """Create a minimal Config instance for validation tests with optional overrides."""
-    defaults = {
-        "MODEL_NAME": "microsoft/resnet-50",
-        "MODEL_PATH": None,
-        "INFERENCE_DEVICE": "cpu",
-        "API_HOST": "127.0.0.1",
-        "API_KEY": None,
-        "API_PORT": 8000,
-        "API_VERSION": "1.0.0",
-        "DEBUG": False,
-        "LOG_LEVEL": "INFO",
-        "LOG_FORMAT": "json",
-        "MAX_FILE_SIZE_MB": 16,
-        "MAX_CHUNK_SIZE_MB": 1,
-        "MAX_IMAGE_DIMENSIONS": (100, 100),
-        "MODEL_INPUT_SHAPE": (1, 3, 224, 224),
-        "TOP_K_PREDICTIONS": 5,
-        "MAX_TOP_K_PREDICTIONS": 10,
-        "MAX_CONCURRENT_REQUESTS": 256,
-        "MAX_BATCH_SIZE": 32,
-        "BATCHING_TIMEOUT_MS": 3,
-        "API_RETRY": 5,
-    }
-    return Config(**{**defaults, **overrides})
 
 
 def test_validate_accepts_valid_config():

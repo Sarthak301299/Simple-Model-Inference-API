@@ -5,7 +5,7 @@ import pytest
 import torch
 from PIL import Image
 
-from model_manager import ModelManager
+from src.model_manager import ModelManager
 
 
 class FakeProcessor:
@@ -13,10 +13,8 @@ class FakeProcessor:
         self.called_with = None
 
     def __call__(self, images, return_tensors="pt"):
-        # return a fake pixel_values tensor shaped (batch,3,224,224)
-        batch = len(images)
         self.called_with = list(images)
-        return {"pixel_values": torch.zeros(batch, 3, 224, 224)}
+        return {"pixel_values": torch.zeros(len(images), 3, 224, 224)}
 
 
 class FakeModel:
@@ -27,7 +25,6 @@ class FakeModel:
         self.moved_to = None
 
     def to(self, device):
-        # record device move
         self.moved_to = device
         return self
 
@@ -35,10 +32,189 @@ class FakeModel:
         pass
 
     def __call__(self, inputs):
-        batch_size = inputs.shape[0]
-        # return logits for three classes
-        logits = torch.tensor([[0.1, 2.0, 0.5]] * batch_size)
-        return SimpleNamespace(logits=logits)
+        return SimpleNamespace(logits=torch.tensor([[0.1, 2.0, 0.5]] * inputs.shape[0]))
+
+
+def test_constructor_falls_back_to_cpu_when_cuda_unavailable(monkeypatch):
+    monkeypatch.setattr("src.model_manager.torch.cuda.is_available", lambda: False)
+
+    manager = ModelManager(device="cuda")
+
+    assert manager.device == torch.device("cpu")
+
+
+def test_constructor_stores_model_path_without_loading():
+    manager = ModelManager(model_path="/tmp/model.pt", device="cpu")
+
+    assert manager.model_path == "/tmp/model.pt"
+    assert manager.model_loaded is False
+
+
+def test_load_model_processor_failure_leaves_model_unloaded(monkeypatch):
+    class FailingProcessor:
+        @staticmethod
+        def from_pretrained(name):
+            raise RuntimeError("processor failed")
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", FailingProcessor)
+    manager = ModelManager(device="cpu")
+
+    with pytest.raises(RuntimeError):
+        manager.load_model()
+
+    assert manager.model_loaded is False
+
+
+def test_load_model_moves_model_to_device_and_marks_loaded(monkeypatch):
+    monkeypatch.setattr(
+        "src.model_manager.AutoImageProcessor",
+        types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
+    )
+    monkeypatch.setattr(
+        "src.model_manager.AutoModelForImageClassification",
+        types.SimpleNamespace(from_pretrained=lambda name: FakeModel()),
+    )
+    manager = ModelManager(device="cpu")
+
+    manager.load_model()
+
+    assert manager.model_loaded is True
+    assert manager.model.moved_to == torch.device("cpu")
+
+
+def test_preprocess_inputs_accepts_list_and_preserves_batch_size():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+    manager.image_processor = FakeProcessor()
+    images = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2))]
+
+    tensor = manager.preprocess_inputs(images)
+
+    assert tensor.shape[0] == 2
+    assert manager.image_processor.called_with == images
+
+
+def test_preprocess_inputs_rejects_empty_list():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+    manager.image_processor = FakeProcessor()
+
+    with pytest.raises(ValueError):
+        manager.preprocess_inputs([])
+
+
+def test_preprocess_inputs_rejects_missing_processor():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+    manager.image_processor = None
+
+    with pytest.raises(TypeError):
+        manager.preprocess_inputs(Image.new("RGB", (2, 2)))
+
+
+def test_predict_rejects_non_tensor_input():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+
+    with pytest.raises(AttributeError):
+        manager.predict("not-a-tensor")  # pyright: ignore[reportArgumentType]
+
+
+def test_predict_returns_logits_and_positive_latency():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+
+    logits, latency_ms = manager.predict(torch.zeros(2, 3, 224, 224))
+
+    assert logits.shape == (2, 3)
+    assert latency_ms >= 0
+
+
+def test_predict_raises_when_model_output_has_no_logits():
+    class NoLogitsModel:
+        def eval(self):
+            pass
+
+        def __call__(self, inputs):
+            return SimpleNamespace(scores=torch.zeros(1, 3))
+
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = NoLogitsModel()
+
+    with pytest.raises(AttributeError):
+        manager.predict(torch.zeros(1, 3, 224, 224))
+
+
+def test_top_k_returns_descending_labels_and_scores():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel(id2label={0: "zero", 1: "one", 2: "two"})
+
+    result = manager.top_k_from_logits(torch.tensor([[0.2, 3.0, 1.0]]), k=3)
+
+    assert [label for label, _ in result[0]] == ["one", "two", "zero"]
+    assert [score for _, score in result[0]] == [3.0, 1.0, 0.20000000298023224]
+
+
+def test_top_k_rejects_bool_k():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+
+    with pytest.raises(TypeError):
+        manager.top_k_from_logits(
+            torch.zeros(1, 3), k=True
+        )  # pyright: ignore[reportArgumentType]
+
+
+def test_top_k_rejects_k_larger_than_class_count():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+
+    with pytest.raises(ValueError):
+        manager.top_k_from_logits(torch.zeros(1, 3), k=4)
+
+
+def test_top_k_falls_back_for_missing_label_index():
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel(id2label={0: "zero"})
+
+    result = manager.top_k_from_logits(torch.tensor([[0.0, 10.0]]), k=1)
+
+    assert result[0][0][0] == "1"
+
+
+def test_cleanup_model_is_idempotent_when_not_loaded():
+    manager = ModelManager(device="cpu")
+
+    manager.cleanup_model()
+    manager.cleanup_model()
+
+    assert manager.model_loaded is False
+
+
+def test_cleanup_model_deletes_loaded_state(monkeypatch):
+    collected = []
+    monkeypatch.setattr("src.model_manager.gc.collect", lambda: collected.append(True))
+    manager = ModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+    manager.image_processor = FakeProcessor()
+
+    manager.cleanup_model()
+
+    assert manager.model_loaded is False
+    assert collected == [True]
+    assert manager.model == None
+    assert manager.image_processor == None
 
 
 def test_init_validation():
@@ -56,11 +232,11 @@ def test_load_model_monkeypatched(monkeypatch):
 
     # monkeypatch AutoImageProcessor and AutoModelForImageClassification
     monkeypatch.setattr(
-        "model_manager.AutoImageProcessor",
+        "src.model_manager.AutoImageProcessor",
         types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
     )
     monkeypatch.setattr(
-        "model_manager.AutoModelForImageClassification",
+        "src.model_manager.AutoModelForImageClassification",
         types.SimpleNamespace(from_pretrained=lambda name: FakeModel()),
     )
 
@@ -129,7 +305,7 @@ def test_top_k_invalid_k_values():
         manager.top_k_from_logits(logits, k=-1)
     with pytest.raises(TypeError):
         manager.top_k_from_logits(
-            logits, k="two"  # pyright: ignore [reportArgumentType]
+            logits, k="two"  # pyright: ignore [reportArgumentType] # type: ignore
         )
 
 
@@ -171,7 +347,7 @@ def test_load_model_file_not_found(monkeypatch):
     manager = ModelManager()
     # return a valid processor but make the model manager raise
     monkeypatch.setattr(
-        "model_manager.AutoImageProcessor",
+        "src.model_manager.AutoImageProcessor",
         types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
     )
 
@@ -180,7 +356,7 @@ def test_load_model_file_not_found(monkeypatch):
         def from_pretrained(name):
             raise RuntimeError("simulated HF failure")
 
-    monkeypatch.setattr("model_manager.AutoModelForImageClassification", Fail)
+    monkeypatch.setattr("src.model_manager.AutoModelForImageClassification", Fail)
 
     with pytest.raises(FileNotFoundError):
         manager.load_model()
@@ -189,7 +365,7 @@ def test_load_model_file_not_found(monkeypatch):
 def test_load_model_falls_back_to_local_weights_when_hf_load_fails(monkeypatch):
     manager = ModelManager(model_name="microsoft/resnet-50", device="cpu")
     monkeypatch.setattr(
-        "model_manager.AutoImageProcessor",
+        "src.model_manager.AutoImageProcessor",
         types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
     )
 
@@ -207,7 +383,7 @@ def test_load_model_falls_back_to_local_weights_when_hf_load_fails(monkeypatch):
                 raise RuntimeError("simulated HF failure")
             return LocalModel()
 
-    monkeypatch.setattr("model_manager.AutoModelForImageClassification", FailThenLoad)
+    monkeypatch.setattr("src.model_manager.AutoModelForImageClassification", FailThenLoad)
 
     with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
         torch.save({"state": torch.tensor([1.0])}, tmp.name)
@@ -231,7 +407,9 @@ def test_preprocess_inputs_invalid_type():
 
     # wrong datatype (int)
     with pytest.raises(TypeError):
-        manager.preprocess_inputs(123)  # pyright: ignore [reportArgumentType]
+        manager.preprocess_inputs(
+            123  # pyright: ignore [reportArgumentType] # type: ignore
+        )
 
 
 def test_predict_invalid_inputs():
@@ -241,7 +419,7 @@ def test_predict_invalid_inputs():
 
     # None -> TypeError (explicit check)
     with pytest.raises(TypeError):
-        manager.predict(None)  # pyright: ignore [reportArgumentType]
+        manager.predict(None)  # pyright: ignore [reportArgumentType] # type: ignore
 
 
 def test_top_k_from_logits_invalid():
@@ -252,7 +430,7 @@ def test_top_k_from_logits_invalid():
     # non-tensor input
     with pytest.raises(TypeError):
         manager.top_k_from_logits(
-            [1, 2, 3], k=1  # pyright: ignore [reportArgumentType]
+            [1, 2, 3], k=1  # pyright: ignore [reportArgumentType] # type: ignore
         )
 
     # wrong-dim tensor

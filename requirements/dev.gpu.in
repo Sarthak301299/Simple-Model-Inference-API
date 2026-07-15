@@ -1,4 +1,4 @@
--r cpu.in
+-r cuda-cu126.in
 
 pytest
 pytest-cov

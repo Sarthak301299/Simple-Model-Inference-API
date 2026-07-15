@@ -8,9 +8,9 @@ import time
 import torch
 from PIL import Image
 from typing import Tuple, List
-from config import Config
-from model_manager import ModelManager
-from metrics import MODEL_READY, BATCH_SIZE, INFERENCE_LATENCY
+from src.config import Config
+from src.model_manager import ModelManager
+from src.metrics import MODEL_READY, BATCH_SIZE, INFERENCE_LATENCY
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -30,7 +30,6 @@ FROM python:3.12-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH="/app/src" \
     PATH="/opt/venv/bin:$PATH" \
     MODEL_NAME="microsoft/resnet-50" \
     INFERENCE_DEVICE="cpu" \
