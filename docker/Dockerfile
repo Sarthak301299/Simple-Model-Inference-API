@@ -15,17 +15,19 @@ ENV UV_COMPILE_BYTECODE=1 \
 # Copy dependency definition files first for optimal layer caching
 COPY pyproject.toml uv.lock ./
 
+ARG EXTRA=cpu
+
 # Install dependencies into a self-contained virtual environment (.venv)
 # Using cache mounting prevents downloading packages on every rebuild
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra ${EXTRA}
 
 # Copy the rest of the application source code
 COPY . .
 
 # Complete the sync to install the project itself into the .venv
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --no-editable ${EXTRA}
 
 # Stage 2: Runtime - Minimal image with only necessary dependencies
 FROM python:3.12-slim

@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        REQUIREMENTS_FILE: requirements/cuda-cu126.txt
+        EXTRA: gpu
     container_name: simple-model-inference-api-container
     ports:
       - "8000:8000"

@@ -65,3 +65,45 @@ jobs:
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify torch is actually installed
+        run: |
+            docker run --rm simple-model-inference-api:cpuci \
+            python -c "import torch; print('torch', torch.__version__, 'OK')"
+      - name: Start container for a smoke test
+        run: |
+            docker run -d --name smoke-test -p 8000:8000 \
+            -e API_KEY= \
+            simple-model-inference-api:cpuci
+      - name: Wait for /health/live
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health/live; then
+              echo "Service is live"
+              exit 0
+            fi
+            echo "Attempt $i: not live yet, retrying..."
+            sleep 3
+          done
+          echo "Service did not become live in time"
+          docker logs smoke-test
+          exit 1
+      - name: Wait for /health/ready (model fully loaded)
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/health/ready; then
+              echo "Model loaded and ready"
+              exit 0
+            fi
+            echo "Attempt $i: not ready yet, retrying..."
+            sleep 5
+          done
+          echo "Service did not become ready in time"
+          docker logs smoke-test
+          exit 1
+      - name: Dump container logs
+        if: always()
+        run: docker logs smoke-test || true
+
+      - name: Stop and remove smoke test container
+        if: always()
+        run: docker rm -f smoke-test || true

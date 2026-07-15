@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        REQUIREMENTS_FILE: requirements/cpu.txt
+        EXTRA: cpu
     container_name: simple-model-inference-api-container
     ports:
       - "8000:8000"
