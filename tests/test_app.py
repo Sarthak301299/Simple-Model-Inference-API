@@ -275,7 +275,7 @@ def test_info_returns_model_metadata():
 
 
 @pytest.mark.parametrize(
-    "len, exception, status_code",
+    "content_length, exception, status_code",
     [("oops", HTTPException, 400), ("1048577", HTTPException, 413)],
 )
 def test_predict_rejects_invalid_content_length(content_length, exception, status_code):
