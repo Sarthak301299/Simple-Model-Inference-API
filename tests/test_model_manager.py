@@ -383,7 +383,9 @@ def test_load_model_falls_back_to_local_weights_when_hf_load_fails(monkeypatch):
                 raise RuntimeError("simulated HF failure")
             return LocalModel()
 
-    monkeypatch.setattr("src.model_manager.AutoModelForImageClassification", FailThenLoad)
+    monkeypatch.setattr(
+        "src.model_manager.AutoModelForImageClassification", FailThenLoad
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
         torch.save({"state": torch.tensor([1.0])}, tmp.name)

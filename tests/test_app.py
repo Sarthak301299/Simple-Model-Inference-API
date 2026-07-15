@@ -66,27 +66,24 @@ def test_verify_api_key_accepts_matching_key():
         (None, False, 500),
         (
             SimpleNamespace(
-                inference_thread=SimpleNamespace(
-                    is_alive=lambda: False
-                ), shutdown_event=threading.Event()
+                inference_thread=SimpleNamespace(is_alive=lambda: False),
+                shutdown_event=threading.Event(),
             ),
             False,
             500,
         ),
         (
             SimpleNamespace(
-                inference_thread=SimpleNamespace(
-                    is_alive=lambda: True
-                ), shutdown_event=threading.Event()
+                inference_thread=SimpleNamespace(is_alive=lambda: True),
+                shutdown_event=threading.Event(),
             ),
             True,
             500,
         ),
         (
             SimpleNamespace(
-                inference_thread=SimpleNamespace(
-                    is_alive=lambda: True
-                ), shutdown_event=threading.Event()
+                inference_thread=SimpleNamespace(is_alive=lambda: True),
+                shutdown_event=threading.Event(),
             ),
             False,
             200,
