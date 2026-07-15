@@ -1,4 +1,3 @@
-import tempfile
 import types
 from types import SimpleNamespace
 import pytest
@@ -50,6 +49,26 @@ def test_constructor_stores_model_path_without_loading():
     assert manager.model_loaded is False
 
 
+def test_local_model_loading(monkeypatch):
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only):
+            return True
+
+    class MockModelLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only):
+            return SimpleNamespace(to=lambda inp: True)
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+    monkeypatch.setattr(
+        "src.model_manager.AutoModelForImageClassification", MockModelLoader
+    )
+    manager = ModelManager(model_path=".", device="cpu")
+    manager.load_model()
+    assert manager.model_loaded is True
+
+
 def test_load_model_processor_failure_leaves_model_unloaded(monkeypatch):
     class FailingProcessor:
         @staticmethod
@@ -57,9 +76,9 @@ def test_load_model_processor_failure_leaves_model_unloaded(monkeypatch):
             raise RuntimeError("processor failed")
 
     monkeypatch.setattr("src.model_manager.AutoImageProcessor", FailingProcessor)
-    manager = ModelManager(device="cpu")
+    manager = ModelManager(device="cpu", model_path=".")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(FileNotFoundError):
         manager.load_model()
 
     assert manager.model_loaded is False
@@ -192,7 +211,7 @@ def test_top_k_falls_back_for_missing_label_index():
     assert result[0][0][0] == "1"
 
 
-def test_cleanup_model_is_idempotent_when_not_loaded():
+def test_cleanup_model_is_idempotent_when_not_loaded(monkeypatch):
     manager = ModelManager(device="cpu")
 
     manager.cleanup_model()
@@ -204,7 +223,7 @@ def test_cleanup_model_is_idempotent_when_not_loaded():
 def test_cleanup_model_deletes_loaded_state(monkeypatch):
     collected = []
     monkeypatch.setattr("src.model_manager.gc.collect", lambda: collected.append(True))
-    manager = ModelManager(device="cpu")
+    manager = ModelManager(device="cuda")
     manager.model_loaded = True
     manager.model = FakeModel()
     manager.image_processor = FakeProcessor()
@@ -340,61 +359,6 @@ def test_methods_raise_if_not_loaded():
         manager.predict(torch.zeros(1, 3, 224, 224))
     with pytest.raises(ValueError):
         manager.top_k_from_logits(torch.zeros(1, 3), k=1)
-
-
-def test_load_model_file_not_found(monkeypatch):
-    """If HF loading fails and no local model_path is provided, load_model should raise FileNotFoundError."""
-    manager = ModelManager()
-    # return a valid processor but make the model manager raise
-    monkeypatch.setattr(
-        "src.model_manager.AutoImageProcessor",
-        types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
-    )
-
-    class Fail:
-        @staticmethod
-        def from_pretrained(name):
-            raise RuntimeError("simulated HF failure")
-
-    monkeypatch.setattr("src.model_manager.AutoModelForImageClassification", Fail)
-
-    with pytest.raises(FileNotFoundError):
-        manager.load_model()
-
-
-def test_load_model_falls_back_to_local_weights_when_hf_load_fails(monkeypatch):
-    manager = ModelManager(model_name="microsoft/resnet-50", device="cpu")
-    monkeypatch.setattr(
-        "src.model_manager.AutoImageProcessor",
-        types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
-    )
-
-    class LocalModel(FakeModel):
-        def load_state_dict(self, state):
-            self.loaded_state = state
-
-    class FailThenLoad:
-        calls = 0
-
-        @classmethod
-        def from_pretrained(cls, name):
-            cls.calls += 1
-            if cls.calls == 1:
-                raise RuntimeError("simulated HF failure")
-            return LocalModel()
-
-    monkeypatch.setattr(
-        "src.model_manager.AutoModelForImageClassification", FailThenLoad
-    )
-
-    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
-        torch.save({"state": torch.tensor([1.0])}, tmp.name)
-        manager.model_path = tmp.name
-
-    manager.load_model()
-
-    assert manager.model_loaded is True
-    assert manager.model.loaded_state["state"].item() == 1.0
 
 
 def test_preprocess_inputs_invalid_type():

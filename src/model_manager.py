@@ -68,41 +68,44 @@ class ModelManager:
         """
         Load the image processor and model weights.
 
-        This may perform network I/O (download) if the model is not available
-        locally. After loading the model is moved to `self.device`.
+        We first check for the model and image processor in the provided valid model path.
+        If no valid path is provided or the model/image_processor does not exist in the path use the HuggingFace cache or download.
         """
         logger.info("Loading model %s onto %s", self.model_name, self.device)
-        # Load image processor from the pretrained model repository
-        # (this may download tokenizer/config if not cached)
-        self.image_processor = AutoImageProcessor.from_pretrained(self.model_name)
-        try:
-            self.model = AutoModelForImageClassification.from_pretrained(
-                self.model_name
-            )
-        except Exception:
-            exc: Exception = Exception()
-            logger.warning(
-                "Falling back to local model weights from %s",
-                self.model_path,
-            )
-            if self.model is None:
-                try:
-                    self.model = AutoModelForImageClassification.from_pretrained(
-                        self.model_name
-                    )
-                except Exception as retry_exc:
-                    exc = retry_exc
-            if self.model_path is not None and os.path.exists(self.model_path):
-                if self.model is None:
-                    raise RuntimeError(
-                        "Unable to initialize a model instance from the pretrained source."
-                    ) from exc
-                state = torch.load(self.model_path, map_location=self.device)
-                if isinstance(state, dict) and "state_dict" in state:
-                    state = state["state_dict"]
-                self.model.load_state_dict(state)
-            else:
-                raise FileNotFoundError(f"Model path {self.model_path}") from exc
+        local_model_dir = (
+            self.model_path
+            if self.model_path is not None and os.path.isdir(self.model_path)
+            else None
+        )
+        if local_model_dir:
+            logger.info("Model Path Exists, Attempting load")
+            try:
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    local_model_dir, local_files_only=True
+                )
+                self.model = AutoModelForImageClassification.from_pretrained(
+                    local_model_dir, local_files_only=True
+                )
+            except Exception as e:
+                self.model = None
+                self.image_processor = None
+                logger.info(
+                    f"Local model loading failed {e}. Falling back to HuggingFace cache or download."
+                )
+
+        if not self.model:
+            try:
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    self.model_name
+                )
+                self.model = AutoModelForImageClassification.from_pretrained(
+                    self.model_name
+                )
+            except Exception as exc:
+                raise FileNotFoundError(
+                    f"Model loading failure Model Name {self.model_name} Model path {self.model_path}. Exception {exc}"
+                )
+
         self.model.to(self.device)
         self.model_loaded = True
         logger.info("Model %s loaded successfully", self.model_name)
