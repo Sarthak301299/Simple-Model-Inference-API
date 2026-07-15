@@ -213,8 +213,8 @@ def test_cleanup_model_deletes_loaded_state(monkeypatch):
 
     assert manager.model_loaded is False
     assert collected == [True]
-    assert manager.model == None
-    assert manager.image_processor == None
+    assert manager.model is None
+    assert manager.image_processor is None
 
 
 def test_init_validation():
