@@ -95,6 +95,10 @@ exclude = '''
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [dependency-groups]
 dev = [
     "pytest",
