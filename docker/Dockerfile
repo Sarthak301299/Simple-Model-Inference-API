@@ -27,7 +27,7 @@ COPY . .
 
 # Complete the sync to install the project itself into the .venv
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable ${EXTRA}
+    uv sync --frozen --no-dev --no-editable --extra ${EXTRA}
 
 # Stage 2: Runtime - Minimal image with only necessary dependencies
 FROM python:3.12-slim
