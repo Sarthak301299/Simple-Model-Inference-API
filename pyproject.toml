@@ -106,6 +106,5 @@ dev = [
     "black",
     "ruff",
     "pyright",
-    "pip-audit",
     "locust"
 ]

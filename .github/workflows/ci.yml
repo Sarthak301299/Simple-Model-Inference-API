@@ -32,9 +32,9 @@ jobs:
       - name: Type check
         uses: jakebailey/pyright-action@v3
       - name: Unit & Coverage Tests
-        run: pytest --cov=src --cov-report=term-missing --cov-fail-under=80
+        run: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80
       - name: Security Audit
-        run: pip-audit
+        run: uv audit
   build:
     name: Docker Build
     runs-on: ubuntu-latest
