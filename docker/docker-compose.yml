@@ -21,7 +21,7 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - HF_HOME=/home/modelapi/.cache/huggingface
-      # Fixed to match this image's installed dependencies: requirements/cpu.txt has
+      # Fixed to match this image's installed dependencies: The CPU image has
       # no CUDA-enabled torch wheels, so this must stay "cpu" regardless of .env.
       # docker-compose.gpu.yml overrides this to "cuda" for the GPU image, which does
       # have CUDA wheels installed.

@@ -276,14 +276,14 @@ def test_info_returns_model_metadata():
 
 @pytest.mark.parametrize(
     "len, exception, status_code",
-    [("oops", ValueError, None), ("1048577", HTTPException, 413)],
+    [("oops", HTTPException, 400), ("1048577", HTTPException, 413)],
 )
-def test_predict_rejects_invalid_content_length(len, exception, status_code):
+def test_predict_rejects_invalid_content_length(content_length, exception, status_code):
     app_module.app.state.inf_engine = SimpleNamespace(
         ready=True, inference_queue=queue.Queue()
     )
     request = Request(
-        scope={"type": "http", "headers": [(b"content-length", len.encode("utf-8"))]}
+        scope={"type": "http", "headers": [(b"content-length", content_length.encode("utf-8"))]}
     )
     file = UploadFile(
         filename="x.png",
@@ -294,8 +294,8 @@ def test_predict_rejects_invalid_content_length(len, exception, status_code):
     with pytest.raises(exception) as exc:
         asyncio.run(app_module.handle_predict_request(request, file))
 
-    if exc.value == HTTPException:
-        assert exc.value.status_code == 413
+    if status_code is not None:
+        assert exc.value.status_code == status_code
 
 
 def test_predict_rejects_invalid_image_bytes():

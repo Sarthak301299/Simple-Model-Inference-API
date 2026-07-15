@@ -65,6 +65,7 @@ jobs:
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: EXTRA=cpu
       - name: Verify torch is actually installed
         run: |
             docker run --rm simple-model-inference-api:cpuci \

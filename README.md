@@ -70,7 +70,7 @@ Build the Docker image for CUDA 12.6:
 
 ```bash
 docker build -f docker/Dockerfile \
---build-arg REQUIREMENTS_FILE=requirements/cuda-cu126.txt \
+--build-arg EXTRA=gpu \
 -t simple-model-inference-api:cu126 .
 ```
 

@@ -233,11 +233,18 @@ async def handle_predict_request(
 
     max_bytes = app.state.config.MAX_FILE_SIZE_MB * 1024 * 1024
     content_length = request.headers.get("content-length")
-    if content_length is not None and int(content_length) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"File exceeds maximum allowed size of {max_bytes} bytes",
-        )
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail=f"File exceeds maximum allowed size of {max_bytes} bytes",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Content-Length header",
+            )
 
     try:
         img_bytes = await read_with_limits(file, max_bytes)
