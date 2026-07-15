@@ -2,21 +2,30 @@
 # Stage 1: Builder - Install dependencies and prepare Python environment
 FROM python:3.12-slim AS builder
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# Install uv from the distroless image
+COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /uvx /bin/
 
-# Install system dependencies required for building packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Set working directory
+WORKDIR /app
 
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+#Optimize uv performance for Docker
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# Copy dependency definition files first for optimal layer caching
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies into a self-contained virtual environment (.venv)
+# Using cache mounting prevents downloading packages on every rebuild
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+# Copy the rest of the application source code
+COPY . .
+
+# Complete the sync to install the project itself into the .venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
 # Copy requirements and install Python dependencies
 COPY requirements/ ./requirements
@@ -27,38 +36,27 @@ RUN pip install --upgrade pip setuptools wheel && \
 # Stage 2: Runtime - Minimal image with only necessary dependencies
 FROM python:3.12-slim
 
-# Set environment variables
+WORKDIR /app
+
+# Create a secure, non-privileged system user
+RUN useradd -u 8888 -m modelapi
+
+# Place the virtual environment's binaries directly onto the PATH
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/opt/venv/bin:$PATH" \
+    PATH="/app/.venv/bin:$PATH" \
     MODEL_NAME="microsoft/resnet-50" \
     INFERENCE_DEVICE="cpu" \
     API_HOST="0.0.0.0" \
     API_PORT="8000" \
     DEBUG="false"
 
-# Install runtime-only system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 \
-    libopenblas0 \
-    && rm -rf /var/lib/apt/lists/*
+# Copy only the compiled virtual environment from the builder stage
+# Both stages must use identical Python base images so the binary paths match
+COPY --from=builder --chown=modelapi:modelapi /app/.venv /app/.venv
+COPY --from=builder --chown=modelapi:modelapi /app /app
 
-# Create non-root user for security
-RUN useradd -m -u 1000 modelapi && \
-    mkdir -p /app /app/models /home/modelapi/.cache/huggingface && \
-    chown -R modelapi:modelapi /app /home/modelapi
-
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-
-# Set working directory
-WORKDIR /app
-
-# Copy application source code
-COPY --chown=modelapi:modelapi src/ ./src/
-COPY --chown=modelapi:modelapi pyproject.toml .env.shared* ./
-
-# Switch to non-root user
+# Switch to the non-root user for execution
 USER modelapi
 
 # Expose API port

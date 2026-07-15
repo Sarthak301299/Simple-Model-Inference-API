@@ -1,4 +1,0 @@
--r prod.in
-
-torch==2.13.0
-torchvision==0.28.0

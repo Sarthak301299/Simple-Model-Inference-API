@@ -8,13 +8,65 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Framework :: AsyncIO",
 ]
+dependencies = [
+    "uv",
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "transformers",
+    "pillow",
+    "prometheus_client",
+    "python-multipart"
+]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "black",
+# Activates the custom CUDA 12.6 wheels for GPU runtimes
+gpu = [
+    "torch",
+    "torchvision",
+    "torchaudio",
 ]
+# Installs standard PyPI wheels (usually CPU or default fallback)
+cpu = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+]
+
+[tool.uv]
+# Tells uv that a user cannot install both extras at the same time
+default-groups = []
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "gpu" }
+    ]
+]
+
+[tool.uv.sources]
+# When the "gpu" group is requested, use the custom wheel index
+torch = [
+  { index = "pytorch-cuda", extra = "gpu" },
+  { index = "pytorch-cpu", extra = "cpu" }
+]
+torchvision = [
+  { index = "pytorch-cuda", extra = "gpu" },
+  { index = "pytorch-cpu", extra = "cpu" }
+]
+torchaudio = [
+  { index = "pytorch-cuda", extra = "gpu" },
+  { index = "pytorch-cpu", extra = "cpu" }
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu126" # Match your CUDA version (e.g., cu126)
+explicit = true
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -42,3 +94,14 @@ exclude = '''
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "ruff",
+    "pyright",
+    "pip-audit",
+    "locust"
+]

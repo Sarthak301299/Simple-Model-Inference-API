@@ -23,6 +23,7 @@ MANIFEST
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
 
 # Virtual environments
 venv/

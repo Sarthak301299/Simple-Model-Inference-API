@@ -7,11 +7,15 @@ A lightweight, scalable REST API for image classification that uses pre-trained 
 - **REST API**: FastAPI-based HTTP interface for image classification
 - **Batch Processing**: Efficient batch inference with dynamic batching to handle surge of requests
 - **Decoupled Async-Compute Architecture**: Offloads compute-bound operations to a dedicated OS-level worker thread, isolating network I/O from hardware execution.
+- **Isolated Batch Failures**: Failures during image processing ensures that the entire batch is not affected
+- **Prometheus Metrics**: Real-time health and performance updates
+- **Load Tested**: Simulated loads with locust with valid and invalid inputs to demonstrate clean execution
+- **Test Automation**: CI workflow using GitHub Actions to automate testing
 - **Supported Models**: Tested with ResNet-50
 - **GPU Support**: Automatic GPU detection with CUDA support or CPU fallback
 - **Configuration Management**: Environment-based configuration for flexible deployments
 - **Production Ready**: Includes Docker containerization, health checks, and comprehensive logging
-- **Comprehensive Testing**: Full test coverage with pytest
+- **Comprehensive Testing**: High test coverage with pytest
 - **Non-root Container**: Runs as non-privileged user for enhanced security
 
 ## Architecture
@@ -25,7 +29,7 @@ The application consists of three main components:
 ## Prerequisites
 
 - Python 3.12 or higher
-- pip for dependency management
+- uv for dependency management
 - Optional: NVIDIA GPU with CUDA support for accelerated inference
 
 ## Installation
@@ -38,33 +42,22 @@ git clone <repository-url>
 cd Simple\ Model\ Inference\ API
 ```
 
-Create a virtual environment:
+Create a virtual environment and install dependencies (uv automatically creates venv):
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv sync --extra cpu   # For CPU (For deployment)
+uv sync --extra gpu   # For GPU (For deployment)
+uv sync --extra cpu --dev  # For CPU (For development)
+uv sync --extra gpu --dev  # For GPU (For development)
 ```
 
-Install dependencies:
-```bash
-pip install -r requirements/cpu.txt
-```
-
-### Dependency sets
-
-- `requirements/prod.txt`: API runtime dependencies excluding Torch backend selection.
-- `requirements/cpu.txt`: CPU inference runtime.
-- `requirements/cuda-cu126.txt`: CUDA 12.6 inference runtime.
-- `requirements/dev.txt`: test/lint/type-check dependencies.
-- `requirements/dev.gpu.txt`: Same as above but for GPU.
-4. Create a `.env` file for configuration (optional):
+Create a `.env` file for configuration (optional):
 ```bash
 # .env file example
 MODEL_NAME=microsoft/resnet-50
 # Change to cuda for GPU
 INFERENCE_DEVICE=cpu
-API_PORT=8000
-DEBUG=false
 LOG_LEVEL=INFO
+...
 ```
 
 ### Docker
@@ -83,6 +76,7 @@ docker build -f docker/Dockerfile \
 
 Run the container:
 ```bash
+# Can override values in .env like API_HOST and API_PORT if needed.
 docker run --env-file .env -e API_HOST=0.0.0.0 -e API_PORT=8000 -p 8000:8000 simple-model-inference-api:cpu #Or :cu126
 ```
 
@@ -101,7 +95,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up 
 ### Local Development
 
 ```bash
-python -m uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn src.app:app
 ```
 
 The API will be available at `http://localhost:8000`
@@ -112,7 +106,7 @@ The API will be available at `http://localhost:8000`
 docker run -p 8000:8000 \
   -e MODEL_NAME=microsoft/resnet-50 \
   -e INFERENCE_DEVICE=cpu \
-  simple-model-inference-api:latest
+  simple-model-inference-api:cpu
 ```
 
 ### GPU Support (Docker)
@@ -121,7 +115,7 @@ For GPU support, install NVIDIA Docker runtime and use:
 ```bash
 docker run --gpus all -p 8000:8000 \
   -e INFERENCE_DEVICE=cuda \
-  simple-model-inference-api:latest
+  simple-model-inference-api:cu126
 ```
 
 ## API Endpoints
@@ -135,13 +129,73 @@ Returns application health status.
 **Response:**
 ```json
 {
-"status": "ALIVE"
+"status": "alive"
+}
+```
+
+### Readiness Check
+```http
+GET /health/live
+```
+Returns application service availability.
+
+**Response:**
+```json
+{
+"status": "ready"
+}
+```
+
+### Startup Check
+```http
+GET /health/startup
+```
+Returns application startup status.
+
+**Response:**
+```json
+{
+"status": "ready"
+}
+```
+
+### Information
+```http
+GET /info
+Requires API_KEY if set in .env (or via environment variables)
+```
+Returns application health status.
+
+**Response:**
+```json
+{
+"model_name": "<model name>",
+"inference_device": "<inference device>",
+"model_path": "<model path>"
+}
+```
+
+### Metrics
+```http
+GET /metrics
+```
+Returns prometheus metrics.
+
+**Response:**
+```json
+{
+"INFERENCE_LATENCY": "<Inference Latency>",
+"QUEUE_DEPTH": "<Queue Depth>",
+"REQUEST_COUNT": "<Number of HTTP Requests>"
+,
+...
 }
 ```
 
 ### Prediction
 ```http
 POST /predict
+Requires API_KEY if set in .env (or via environment variables)
 Content-Type: multipart/form-data
 
 file: <image-file>
@@ -151,7 +205,7 @@ Upload an image for classification.
 
 **Request:**
 ```bash
-curl -X POST -F "file=@path/to/image.jpg" http://localhost:8000/predict
+curl -H "X-API-Key: YOUR_API_KEY_HERE" -X POST -F "file=@path/to/image.jpg" http://localhost:8000/predict
 ```
 
 **Response:**
@@ -207,6 +261,7 @@ The Dockerfile uses a multi-stage build to minimize image size:
 - Minimal runtime dependencies
 - `.dockerignore` excludes unnecessary files
 - No privileged operations
+- Constant time API key comparison to prevent attackers from exploiting timing attacks
 
 ### Health Checks
 
@@ -218,28 +273,39 @@ The container includes a health check that:
 
 ### Volume Management (Docker Compose)
 
-- `model-cache`: Persistent Hugging Face model cache across restarts
-- `./models`: Local model weights volume (optional)
-
-
+- `model-cache`: Persistent Hugging Face model cache across restarts.
 
 ### Project Structure
 ```
 .
 ├── src/
-│   ├── app.py              # FastAPI application
-│   ├── config.py           # Configuration management
-│   └── model_manager.py    # Model loading and inference
+|   ├── __init__.py
+│   ├── app.py                  # FastAPI application
+│   ├── config.py               # Configuration management
+│   ├── inference_engine.py     # Inference engine decoupling compute from network
+|   ├── metrics.py              # Prometheus metrics
+|   └── model_manager.py        # Model loading and inference
 ├── tests/
+|   ├── load/
+|   |   └── locustfile.py       # Load testing script
 │   ├── test_app.py
 │   ├── test_config.py
-│   └── test_model_manager.py
+│   ├── test_inference_engine.py
+|   ├── test_metrics.py
+|   └── test_model_manager.py
 ├── docker/
-│   ├── Dockerfile          # Production Dockerfile
-│   ├── docker-compose.yml  # Docker Compose configuration
-│   └── .dockerignore       # Docker build exclusions
-├── pyproject.toml          # Project metadata and configuration
-├── requirements.txt        # Python dependencies
-└── README.md               # This file
+│   ├── Dockerfile              # Production Dockerfile
+│   ├── docker-compose.yml      # Docker Compose configuration
+│   └── docker-compose.gpu.yml  # Docker Compose for GPU override
+├── github/
+│   └── workflows/
+|       └── ci.yml              # GitHub Action CI workflow.
+├── pyproject.toml              # Project metadata, configuration, and dependencies
+├── uv.lock                     # Cross-platform lockfile for uv
+├── .gitignore                  # Don't commit to Git
+├── .dockerignore               # Don't move to Docker container
+├── .env_shared                 # Shared environment variables between development and production environments
+├── .env.template               # Template for .env
+└── README.md                   # This file
 ```
 

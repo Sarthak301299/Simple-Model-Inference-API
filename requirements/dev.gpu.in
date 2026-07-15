@@ -1,9 +1,0 @@
--r cuda-cu126.in
-
-pytest
-pytest-cov
-ruff
-black
-pyright
-pip-audit
-locust

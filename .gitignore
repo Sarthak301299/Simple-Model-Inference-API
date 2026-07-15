@@ -1,28 +1,58 @@
 # dotenv environment variables
 .env
+.env.local
 
 # Python cache files
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Coverage artifacts
-.coverage
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 .pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
 
 # Python virtual environment
 venv/
-.venv/
+ENV/
+env/
+.venv
 
 # Data files
 data/
 tests/load/data
 tests/load/*.csv
 
-# VScode setup
-.vscode/*
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Misc
+*.log
+*.bak
+node_modules/
