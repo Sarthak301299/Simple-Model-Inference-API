@@ -27,12 +27,6 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
-# Copy requirements and install Python dependencies
-COPY requirements/ ./requirements
-ARG REQUIREMENTS_FILE=requirements/cpu.txt
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r ${REQUIREMENTS_FILE}
-
 # Stage 2: Runtime - Minimal image with only necessary dependencies
 FROM python:3.12-slim
 
