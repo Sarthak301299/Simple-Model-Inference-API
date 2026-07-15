@@ -55,7 +55,7 @@ pip install -r requirements/cpu.txt
 - `requirements/cpu.txt`: CPU inference runtime.
 - `requirements/cuda-cu126.txt`: CUDA 12.6 inference runtime.
 - `requirements/dev.txt`: test/lint/type-check dependencies.
-- `requirements/load.txt`: load-testing dependencies.
+- `requirements/dev.gpu.txt`: Same as above but for GPU.
 4. Create a `.env` file for configuration (optional):
 ```bash
 # .env file example
