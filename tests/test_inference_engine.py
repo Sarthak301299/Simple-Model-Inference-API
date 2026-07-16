@@ -299,7 +299,7 @@ def test_init_model_initializes_and_loads_model(monkeypatch):
         {
             "torch": FakeModelManager,
             "onnx": FakeModelManager,
-            "tensort": FakeModelManager,
+            "tensorrt": FakeModelManager,
         },
     )
 
