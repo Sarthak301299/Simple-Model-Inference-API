@@ -110,16 +110,18 @@ def fake_ort(monkeypatch):
     )
 
 
-def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path):
-    onnx_path = tmp_path / "resnet-50.onnx"
-    json_path = tmp_path / "resnet-50_config.json"
+def test_load_model_creates_session_with_configured_providers_and_wrong_name(
+    fake_ort, tmp_path
+):
+    onnx_path = tmp_path / "microsoft-resnet-50.onnx"
+    json_path = tmp_path / "microsoft-resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
 
     manager = ONNXModelManager(
-        model_name="resnet-50",
+        model_name="microsoft/resnet-50",
         device="cpu",
         model_path=str(tmp_path),
         inference_backend="onnx",
@@ -135,6 +137,20 @@ def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path
         manager.session.providers  # pyright: ignore[reportArgumentType] # type: ignore
         == ["CPUExecutionProvider"]
     )
+
+
+def test_load_model_raises_on_missing_json(fake_ort, tmp_path):
+    onnx_path = tmp_path / "microsoft-resnet-50.onnx"
+    onnx_path.write_bytes(b"fake onnx bytes")
+
+    manager = ONNXModelManager(
+        model_name="microsoft/resnet-50",
+        device="cpu",
+        model_path=str(tmp_path),
+        inference_backend="onnx",
+    )
+    with pytest.raises(FileNotFoundError):
+        manager.load_model()
 
 
 def test_load_model_defaults_to_cpu_provider_when_unset(fake_ort, tmp_path):
@@ -176,11 +192,78 @@ def test_load_model_raises_value_error_when_invalid_setups(
     manager.model_path = str(tmp_path)
     manager.device = torch.device("cpu")
     manager.inference_backend = "onnx"
-    manager.providers = ["CPUExecutionProvider"]
-    manager.session_path = None  # pyright: ignore[reportArgumentType] # type: ignore
+    manager.providers = providers
+    manager.session_path = session_path
 
     with pytest.raises(ValueError):
         manager.load_model()
+
+
+def test_load_model_raises_key_error_when_missing_id2label(
+    fake_ort, tmp_path, monkeypatch
+):
+    onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
+    onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
+    monkeypatch.setattr("src.model_manager.json.load", lambda input: {"0": "cat"})
+    manager = object.__new__(ONNXModelManager)
+    manager.model_name = "resnet-50"
+    manager.model_path = str(tmp_path)
+    manager.device = torch.device("cpu")
+    manager.inference_backend = "onnx"
+    manager.providers = ["CPUExecutionProvider"]
+    manager.session_path = (
+        onnx_path  # pyright: ignore[reportArgumentType] # type: ignore
+    )
+
+    with pytest.raises(KeyError):
+        manager.load_model()
+
+
+def test_predict_raises_value_error_when_missing_session():
+    manager = object.__new__(ONNXModelManager)
+    manager.model_loaded = True
+    manager.session = None
+
+    with pytest.raises(ValueError):
+        manager.predict(torch.zeros(1))
+
+
+def test_init_model_raises_value_error_when_incorrect_tensorrt(fake_ort, tmp_path):
+    onnx_path = tmp_path / "resnet-50.onnx"
+    onnx_path.write_bytes(b"fake onnx bytes")
+    with pytest.raises(ValueError):
+        manager = ONNXModelManager("resnet-50", "cpu", tmp_path, "tensorrt")
+        manager.load_model()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_load_model_completes_with_tensorrt(fake_ort, tmp_path):
+    onnx_path = tmp_path / "resnet-50.onnx"
+    onnx_path.write_bytes(b"fake onnx bytes")
+
+    ONNXModelManager(
+        model_name="resnet-50",
+        device="cuda",
+        model_path=tmp_path,
+        inference_backend="tensorrt",
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_load_model_completes_with_onnx(fake_ort, tmp_path):
+    onnx_path = tmp_path / "resnet-50.onnx"
+    onnx_path.write_bytes(b"fake onnx bytes")
+
+    ONNXModelManager(
+        model_name="resnet-50",
+        device="cuda",
+        model_path=tmp_path,
+        inference_backend="onnx",
+    )
 
 
 def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path):
@@ -562,16 +645,6 @@ def test_top_k_missing_id2label_raises():
         manager.top_k_from_logits(torch.zeros(1, 3), k=1)
 
 
-def test_top_k_id2label_index_fallback():
-    manager = TorchModelManager()
-    manager.model = FakeModel(id2label=["3"])
-    manager.id2label = {3: "dog"}
-    manager.model_loaded = True
-    logits = torch.tensor([[0.1, 2.0, 0.5]])
-    res = manager.top_k_from_logits(logits, k=3)
-    assert [lbl for lbl, _ in res[0]] == ["1", "2", "0"]
-
-
 def test_methods_raise_if_not_loaded():
     manager = TorchModelManager()
     # ensure model unset
@@ -636,3 +709,46 @@ def test_get_model_info():
     assert isinstance(info, dict)
     assert set(info.keys()) == {"name", "device", "model_path"}
     assert info["name"] == "microsoft/resnet-50"
+
+
+def test_cleanup_backend_fallback_works():
+    class MockModelManager(ModelManager):
+        def load_model(self):
+            pass
+
+        def predict(self, inputs):
+            return inputs
+
+    manager = MockModelManager()
+    manager._cleanup_backend()
+
+
+def test_missing_id2label_fails_load(monkeypatch):
+    manager = object.__new__(TorchModelManager)
+    manager.model_name = "microsoft/resnet-50"
+    manager.device = torch.device("cpu")
+    manager.model_path = None
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name):
+            return True
+
+    class MockModelLoader:
+        @staticmethod
+        def from_pretrained(name):
+            return SimpleNamespace(
+                to=lambda inp: inp,
+            )
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+    monkeypatch.setattr(
+        "src.model_manager.AutoModelForImageClassification", MockModelLoader
+    )
+    with pytest.raises(AttributeError):
+        manager.load_model()
+
+
+def test_cuda_cleanup_completes():
+    manager = TorchModelManager(model_name="microsoft/resnet-50", device="cuda")
+    manager._cleanup_backend()

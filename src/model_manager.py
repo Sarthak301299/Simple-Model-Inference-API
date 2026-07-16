@@ -175,13 +175,7 @@ class ModelManager(ABC):
                 label_idx = (
                     int(idx.item()) if isinstance(idx, torch.Tensor) else int(idx)
                 )
-                try:
-                    if isinstance(self.id2label, dict):
-                        label = self.id2label.get(label_idx, str(label_idx))
-                    else:
-                        label = self.id2label[label_idx]
-                except Exception:
-                    label = str(label_idx)
+                label = self.id2label.get(label_idx, str(label_idx))
                 row.append((label, float(val.item())))
             results.append(row)
         return results
@@ -260,7 +254,7 @@ class TorchModelManager(ModelManager):
         return outputs.logits, latency_ms
 
     def _cleanup_backend(self):
-        if self.device == "cuda":
+        if self.device == torch.device("cuda"):
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 

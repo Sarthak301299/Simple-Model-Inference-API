@@ -455,3 +455,61 @@ def test_lifespan_runs_init_and_cleanup(monkeypatch):
 
     asyncio.run(run_lifespan())
     assert shutdown_called is True
+
+
+@pytest.mark.asyncio
+async def test_metrics_middleware_completion():
+    temp = SimpleNamespace(status_code=200)
+
+    async def tempf(input):
+        return temp
+
+    resp = await app_module.metrics_middleware(
+        request=SimpleNamespace(
+            url=SimpleNamespace(path="/notmetrics")
+        ),  # pyright: ignore[reportArgumentType] # type: ignore
+        call_next=tempf,
+    )
+    assert temp == resp
+
+
+@pytest.mark.asyncio
+async def test_metrics_middleware_returns_on_metric_endpoint():
+    temp = SimpleNamespace(status_code=200)
+
+    async def tempf(input):
+        return temp
+
+    resp = await app_module.metrics_middleware(
+        request=SimpleNamespace(
+            url=SimpleNamespace(path="/metrics")
+        ),  # pyright: ignore[reportArgumentType] # type: ignore
+        call_next=tempf,
+    )
+    assert temp == resp
+
+
+@pytest.mark.asyncio
+async def test_metrics_returns_successfully():
+    return await app_module.metrics()
+
+
+@pytest.mark.asyncio
+async def test_info_fails_without_engine():
+    response = await app_module.info()
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_httpexception_when_bad_content_type():
+    app_module.app.state.inf_engine = SimpleNamespace(ready=True)
+    request = Request(scope={"type": "http"})
+    file = UploadFile(
+        filename="x.png",
+        file=make_png(),
+        headers=Headers({"content-type": "text"}),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await app_module.handle_predict_request(request, file)
+
+    assert exc.value.status_code == 400
