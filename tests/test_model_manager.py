@@ -115,7 +115,7 @@ def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path
 
     manager = ONNXModelManager(
         model_name="resnet-50",
-        device="cuda",
+        device="cpu",
         model_path=str(tmp_path),
         inference_backend="onnx",
     )
@@ -128,7 +128,7 @@ def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path
     )
     assert (
         manager.session.providers  # pyright: ignore[reportArgumentType] # type: ignore
-        == ["CUDAExecutionProvider"]
+        == ["CPUExecutionProvider"]
     )
 
 
