@@ -513,3 +513,24 @@ async def test_predict_raises_httpexception_when_bad_content_type():
         await app_module.handle_predict_request(request, file)
 
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_predict_propagates_413_from_read_with_limits_without_rewrapping():
+    app_module.app.state.config.MAX_FILE_SIZE_MB = 1
+    app_module.app.state.config.MAX_CHUNK_SIZE_MB = 1
+    app_module.app.state.inf_engine = SimpleNamespace(
+        ready=True, inference_queue=queue.Queue()
+    )
+    oversized = io.BytesIO(
+        b"x" * (2 * 1024 * 1024)
+    )  # 2MB body, no Content-Length header set
+    request = Request(scope={"type": "http", "headers": []})
+    file = UploadFile(
+        filename="x.png", file=oversized, headers=Headers({"content-type": "image/png"})
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await app_module.handle_predict_request(request, file)
+
+    assert exc_info.value.status_code == 413

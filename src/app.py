@@ -249,6 +249,8 @@ async def handle_predict_request(
     try:
         img_bytes = await read_with_limits(file, max_bytes)
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
