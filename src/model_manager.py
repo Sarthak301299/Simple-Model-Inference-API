@@ -32,6 +32,7 @@ class ModelManager(ABC):
     image_processor: Any = None
     model_loaded: bool = False
     inference_backend: str = "torch"
+    # Always a dict once populated by load_model(); None only before loading
     id2label: Dict[int, str] | None = None
 
     def __init__(
