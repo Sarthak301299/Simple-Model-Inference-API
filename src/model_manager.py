@@ -237,10 +237,10 @@ class TorchModelManager(ModelManager):
             self.id2label = getattr(self.model.config, "id2label", None)
         except AttributeError as e:
             self.id2label = None
-            logger.error("Model does not have id2label attribute. Error: {e}")
+            logger.error(f"Model does not have id2label attribute. Error: {e}")
             raise e
         self.model_loaded = True
-        logger.info("Model %s loaded successfully", self.model_name)
+        logger.info(f"Model {self.model_name} loaded successfully")
 
     def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, float]:
         if not self.model_loaded:
@@ -249,7 +249,7 @@ class TorchModelManager(ModelManager):
             )
 
         # Run in eval mode with no gradient computation
-        logger.debug("Starting prediction for %d input item(s)", len(inputs))
+        logger.debug(f"Starting prediction for {len(inputs)} input item(s)")
         start_time = time.perf_counter()
         self.model.eval()
         with torch.no_grad():
@@ -267,7 +267,7 @@ class TorchModelManager(ModelManager):
 
 class ONNXModelManager(ModelManager):
     providers: onnxruntime.SessionOptions = []
-    session: onnxruntime.InferenceSession
+    session: onnxruntime.InferenceSession | None = None
     session_path: str
 
     def __init__(self, *args, **kwargs):
@@ -341,6 +341,9 @@ class ONNXModelManager(ModelManager):
                 "Model is not loaded. Please load the model before doing predictions."
             )
 
+        if not self.session:
+            raise ValueError("Session has not been initialized.")
+
         # Run in eval mode with no gradient computation
         logger.debug("Starting prediction for %d input item(s)", len(inputs))
         start_time = time.perf_counter()
@@ -348,6 +351,9 @@ class ONNXModelManager(ModelManager):
         latency_ms = (time.perf_counter() - start_time) * 1000
         logger.info("Prediction completed in %.3f ms", latency_ms)
         return torch.from_numpy(outputs[0]), latency_ms
+
+    def _cleanup_backend(self) -> None:
+        self.session = None
 
 
 InferenceBackendMapping = {

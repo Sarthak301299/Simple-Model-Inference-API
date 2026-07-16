@@ -250,6 +250,7 @@ def test_cleanup_resets_state(fake_ort, tmp_path):
     manager.cleanup_model()
 
     assert manager.model_loaded is False
+    assert manager.session is None
 
 
 def test_constructor_falls_back_to_cpu_when_cuda_unavailable(monkeypatch):
