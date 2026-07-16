@@ -8,6 +8,7 @@ import time
 import torch
 import gc
 import onnxruntime
+import json
 from transformers import AutoModelForImageClassification, AutoImageProcessor
 from typing import Any, Dict, List, Tuple
 from PIL import Image
@@ -31,6 +32,7 @@ class ModelManager(ABC):
     image_processor: Any = None
     model_loaded: bool = False
     inference_backend: str = "torch"
+    id2label: Dict[int, str] | None = None
 
     def __init__(
         self,
@@ -162,8 +164,7 @@ class ModelManager(ABC):
                 "Model is not loaded. Please call load_model() before calling top_k_from_logits."
             )
 
-        id2label = getattr(self.model.config, "id2label", None)
-        if id2label is None:
+        if self.id2label is None:
             raise AttributeError("Model config has no 'id2label' mapping")
 
         values, indices = logits.topk(k=k, dim=-1)
@@ -175,10 +176,10 @@ class ModelManager(ABC):
                     int(idx.item()) if isinstance(idx, torch.Tensor) else int(idx)
                 )
                 try:
-                    if isinstance(id2label, dict):
-                        label = id2label.get(label_idx, str(label_idx))
+                    if isinstance(self.id2label, dict):
+                        label = self.id2label.get(label_idx, str(label_idx))
                     else:
-                        label = id2label[label_idx]
+                        label = self.id2label[label_idx]
                 except Exception:
                     label = str(label_idx)
                 row.append((label, float(val.item())))
@@ -190,11 +191,8 @@ class ModelManager(ABC):
             self.model = None
             self.image_processor = None
             self.model_loaded = False
-            gc.collect()
             self._cleanup_backend()
-            if self.device == torch.device("cuda"):
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+            gc.collect()
 
 
 class TorchModelManager(ModelManager):
@@ -235,6 +233,12 @@ class TorchModelManager(ModelManager):
                 )
 
         self.model.to(self.device)
+        try:
+            self.id2label = getattr(self.model.config, "id2label", None)
+        except AttributeError as e:
+            self.id2label = None
+            logger.error("Model does not have id2label attribute. Error: {e}")
+            raise e
         self.model_loaded = True
         logger.info("Model %s loaded successfully", self.model_name)
 
@@ -268,6 +272,12 @@ class ONNXModelManager(ModelManager):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        rstring = self.model_name.replace("/", "-")
+        if rstring != self.model_name:
+            logger.warning(
+                f"Input Model name {self.model_name} contains invalid '/' characters. Resolving to {rstring}"
+            )
+            self.model_name = rstring
         if (
             self.model_path is None
             or not os.path.isdir(self.model_path)
@@ -309,6 +319,19 @@ class ONNXModelManager(ModelManager):
             raise ValueError(
                 "Model path and inference backend must be provided for ONNX/TensorRT"
             )
+        try:
+            with open(
+                os.path.join(str(self.model_path), f"{self.model_name}_config.json")
+            ) as f:
+                config = json.load(f)
+        except FileNotFoundError as e:
+            logger.error(f"Config file not found: {e}")
+            raise e
+        try:
+            self.id2label = {int(k): v for k, v in config["id2label"].items()}
+        except KeyError as e:
+            logger.error(f"Invalid config file: {e}")
+            raise e
         self.model_loaded = True
         logger.info("Model %s loaded successfully", self.model_name)
 
@@ -330,5 +353,5 @@ class ONNXModelManager(ModelManager):
 InferenceBackendMapping = {
     "torch": TorchModelManager,
     "onnx": ONNXModelManager,
-    "tensort": ONNXModelManager,
+    "tensorrt": ONNXModelManager,
 }

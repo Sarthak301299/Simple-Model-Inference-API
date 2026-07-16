@@ -2,6 +2,7 @@ import types
 from types import SimpleNamespace
 import pytest
 import torch
+import json
 import numpy as np
 from PIL import Image
 
@@ -111,7 +112,11 @@ def fake_ort(monkeypatch):
 
 def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path):
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
 
     manager = ONNXModelManager(
         model_name="resnet-50",
@@ -134,7 +139,11 @@ def test_load_model_creates_session_with_configured_providers(fake_ort, tmp_path
 
 def test_load_model_defaults_to_cpu_provider_when_unset(fake_ort, tmp_path):
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
 
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
@@ -176,7 +185,11 @@ def test_load_model_raises_value_error_when_invalid_setups(
 
 def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path):
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 
@@ -190,8 +203,13 @@ def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path):
 
 
 def test_predict_passes_numpy_pixel_values_to_session_run(fake_ort, tmp_path):
+
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 
@@ -209,7 +227,11 @@ def test_predict_passes_numpy_pixel_values_to_session_run(fake_ort, tmp_path):
 
 def test_predict_raises_clear_error_when_model_not_loaded(fake_ort, tmp_path):
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
     manager = ONNXModelManager(model_name="resnet-50", model_path=tmp_path)
     with pytest.raises(ValueError, match="not loaded"):
         manager.predict(torch.zeros(1, 3, 224, 224))
@@ -217,7 +239,11 @@ def test_predict_raises_clear_error_when_model_not_loaded(fake_ort, tmp_path):
 
 def test_cleanup_resets_state(fake_ort, tmp_path):
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 
@@ -250,7 +276,10 @@ def test_local_model_loading(monkeypatch):
     class MockModelLoader:
         @staticmethod
         def from_pretrained(name, local_files_only):
-            return SimpleNamespace(to=lambda inp: True)
+            return SimpleNamespace(
+                to=lambda inp: True,
+                config=SimpleNamespace(idtolabel={0: "cat", 1: "dog"}),
+            )
 
     monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
     monkeypatch.setattr(
@@ -366,6 +395,7 @@ def test_top_k_returns_descending_labels_and_scores():
     manager = TorchModelManager(device="cpu")
     manager.model_loaded = True
     manager.model = FakeModel(id2label={0: "zero", 1: "one", 2: "two"})
+    manager.id2label = {0: "zero", 1: "one", 2: "two"}
 
     result = manager.top_k_from_logits(torch.tensor([[0.2, 3.0, 1.0]]), k=3)
 
@@ -397,6 +427,7 @@ def test_top_k_falls_back_for_missing_label_index():
     manager = TorchModelManager(device="cpu")
     manager.model_loaded = True
     manager.model = FakeModel(id2label={0: "zero"})
+    manager.id2label = {0: "zero"}
 
     result = manager.top_k_from_logits(torch.tensor([[0.0, 10.0]]), k=1)
 
@@ -480,6 +511,7 @@ def test_top_k_from_logits(monkeypatch):
     manager = TorchModelManager()
     # provide a fake loaded model with id2label
     manager.model = FakeModel(id2label={0: "a", 1: "b", 2: "c"})
+    manager.id2label = {0: "a", 1: "b", 2: "c"}
     manager.model_loaded = True
 
     logits = torch.tensor([[0.1, 2.0, 0.5], [1.0, 0.2, 0.3]])
@@ -531,13 +563,12 @@ def test_top_k_missing_id2label_raises():
 
 def test_top_k_id2label_index_fallback():
     manager = TorchModelManager()
-    # provide id2label as a sequence too small to cover indices -> triggers except
-    manager.model = FakeModel(id2label=["only"])
+    manager.model = FakeModel(id2label=["3"])
+    manager.id2label = {3: "dog"}
     manager.model_loaded = True
     logits = torch.tensor([[0.1, 2.0, 0.5]])
     res = manager.top_k_from_logits(logits, k=3)
-    # index 0 maps to the provided item, out-of-range indices fallback
-    assert [lbl for lbl, _ in res[0]] == ["1", "2", "only"]
+    assert [lbl for lbl, _ in res[0]] == ["1", "2", "0"]
 
 
 def test_methods_raise_if_not_loaded():
