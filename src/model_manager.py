@@ -7,9 +7,11 @@ import logging
 import time
 import torch
 import gc
+import onnxruntime
 from transformers import AutoModelForImageClassification, AutoImageProcessor
 from typing import Any, Dict, List, Tuple
 from PIL import Image
+from abc import ABC, abstractmethod
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -17,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ModelManager:
+class ModelManager(ABC):
     """
     Class for Model Functions.
     """
@@ -28,12 +30,14 @@ class ModelManager:
     model_path: str | None = None
     image_processor: Any = None
     model_loaded: bool = False
+    inference_backend: str = "torch"
 
     def __init__(
         self,
         model_name: str | None = "microsoft/resnet-50",
-        device: str = "cuda",
+        device: str = "cpu",
         model_path: str | None = None,
+        inference_backend: str = "torch",
     ) -> None:
         """
         Initialize the manager with configuration only — do not load the model here.
@@ -44,9 +48,14 @@ class ModelManager:
         """
         if model_name is None:
             raise ValueError("model_name must be provided")
-        if model_name not in ["microsoft/resnet-50", "google/mobilenet_v2_1.4_224"]:
+        if model_name not in [
+            "microsoft/resnet-50",
+            "google/mobilenet_v2_1.4_224",
+            "resnet-50",
+            "mobilenet_v2",
+        ]:
             raise ValueError(
-                "model_name must be 'microsoft/resnet-50' or 'google/mobilenet_v2_1.4_224'"
+                "model_name must be 'microsoft/resnet-50', 'google/mobilenet_v2_1.4_224', 'resnet-50', or 'mobilenet_v2'"
             )
         if device not in ["cuda", "cpu"]:
             raise ValueError("device must be 'cuda' or 'cpu'")
@@ -58,57 +67,39 @@ class ModelManager:
             else torch.device("cpu")
         )
         self.model_path = model_path
+        self.inference_backend = inference_backend
         logger.debug(
             "Initialized ModelManager for %s on %s",
             self.model_name,
             self.device,
         )
 
-    def load_model(self) -> None:
-        """
-        Load the image processor and model weights.
+    @abstractmethod
+    def load_model(self) -> None: ...
 
-        We first check for the model and image processor in the provided valid model path.
-        If no valid path is provided or the model/image_processor does not exist in the path use the HuggingFace cache or download.
-        """
-        logger.info("Loading model %s onto %s", self.model_name, self.device)
-        local_model_dir = (
-            self.model_path
-            if self.model_path is not None and os.path.isdir(self.model_path)
-            else None
-        )
-        if local_model_dir:
-            logger.info("Model Path Exists, Attempting load")
-            try:
-                self.image_processor = AutoImageProcessor.from_pretrained(
-                    local_model_dir, local_files_only=True
-                )
-                self.model = AutoModelForImageClassification.from_pretrained(
-                    local_model_dir, local_files_only=True
-                )
-            except Exception as e:
-                self.model = None
-                self.image_processor = None
-                logger.info(
-                    f"Local model loading failed {e}. Falling back to HuggingFace cache or download."
-                )
+    """
+    Load the image processor and model weights.
 
-        if not self.model:
-            try:
-                self.image_processor = AutoImageProcessor.from_pretrained(
-                    self.model_name
-                )
-                self.model = AutoModelForImageClassification.from_pretrained(
-                    self.model_name
-                )
-            except Exception as exc:
-                raise FileNotFoundError(
-                    f"Model loading failure Model Name {self.model_name} Model path {self.model_path}. Exception {exc}"
-                )
+    We first check for the model and image processor in the provided valid model path.
+    If no valid path is provided or the model/image_processor does not exist in the path use the HuggingFace cache or download.
+    """
 
-        self.model.to(self.device)
-        self.model_loaded = True
-        logger.info("Model %s loaded successfully", self.model_name)
+    @abstractmethod
+    def predict(self, inputs) -> tuple[torch.Tensor, float]: ...
+
+    """
+    Run the model forward pass and return logits.
+
+    Args:
+        inputs: Preprocessed input sequence (from `preprocess_inputs`).
+
+    Returns:
+        A `torch.Tensor` of logits with shape (batch_size, num_classes) and the inference time.
+    """
+
+    def _cleanup_backend(self) -> None:
+        """Override for backend-specific teardown. No-op by default"""
+        pass
 
     def preprocess_inputs(
         self, inputs: Image.Image | List[Image.Image] | None = None
@@ -143,33 +134,6 @@ class ModelManager:
         )["pixel_values"].to(self.device)
         logger.debug("Preprocessing completed for %d image(s)", len(inputs))
         return processed_inputs
-
-    def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, float]:
-        """
-        Run the model forward pass and return logits.
-
-        Args:
-            inputs: Preprocessed input sequence (from `preprocess_inputs`).
-
-        Returns:
-            A `torch.Tensor` of logits with shape (batch_size, num_classes) and the inference time.
-        """
-
-        if not self.model_loaded:
-            raise ValueError(
-                "Model is not loaded. Please load the model before doing predictions."
-            )
-
-        # Run in eval mode with no gradient computation
-        logger.debug("Starting prediction for %d input item(s)", len(inputs))
-        start_time = time.perf_counter()
-        self.model.eval()
-        with torch.no_grad():
-            outputs = self.model(inputs)
-
-        latency_ms = (time.perf_counter() - start_time) * 1000
-        logger.info("Prediction completed in %.3f ms", latency_ms)
-        return outputs.logits, latency_ms
 
     def get_model_info(self) -> Dict[str, str | None]:
         """Return basic metadata about the manager configuration.
@@ -227,6 +191,144 @@ class ModelManager:
             self.image_processor = None
             self.model_loaded = False
             gc.collect()
+            self._cleanup_backend()
             if self.device == torch.device("cuda"):
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
+
+
+class TorchModelManager(ModelManager):
+    def load_model(self):
+        logger.info("Loading model %s onto %s", self.model_name, self.device)
+        local_model_dir = (
+            self.model_path
+            if self.model_path is not None and os.path.isdir(self.model_path)
+            else None
+        )
+        if local_model_dir:
+            logger.info("Model Path Exists, Attempting load")
+            try:
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    local_model_dir, local_files_only=True
+                )
+                self.model = AutoModelForImageClassification.from_pretrained(
+                    local_model_dir, local_files_only=True
+                )
+            except Exception as e:
+                self.model = None
+                self.image_processor = None
+                logger.info(
+                    f"Local model loading failed {e}. Falling back to HuggingFace cache or download."
+                )
+
+        if not self.model:
+            try:
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    self.model_name
+                )
+                self.model = AutoModelForImageClassification.from_pretrained(
+                    self.model_name
+                )
+            except Exception as exc:
+                raise FileNotFoundError(
+                    f"Model loading failure Model Name {self.model_name} Model path {self.model_path}. Exception {exc}"
+                )
+
+        self.model.to(self.device)
+        self.model_loaded = True
+        logger.info("Model %s loaded successfully", self.model_name)
+
+    def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, float]:
+        if not self.model_loaded:
+            raise ValueError(
+                "Model is not loaded. Please load the model before doing predictions."
+            )
+
+        # Run in eval mode with no gradient computation
+        logger.debug("Starting prediction for %d input item(s)", len(inputs))
+        start_time = time.perf_counter()
+        self.model.eval()
+        with torch.no_grad():
+            outputs = self.model(inputs)
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        logger.info("Prediction completed in %.3f ms", latency_ms)
+        return outputs.logits, latency_ms
+
+    def _cleanup_backend(self):
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+
+class ONNXModelManager(ModelManager):
+    providers: onnxruntime.SessionOptions = []
+    session: onnxruntime.InferenceSession
+    session_path: str
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if (
+            self.model_path is None
+            or not os.path.isdir(self.model_path)
+            or not os.path.isfile(
+                os.path.join(self.model_path, self.model_name) + ".onnx"
+            )
+        ):
+            raise (
+                FileNotFoundError(
+                    f"Model path {self.model_path}/{self.model_name}.onnx does not exist. Required for ONNX/TensorRT"
+                )
+            )
+        self.session_path = os.path.join(self.model_path, self.model_name) + ".onnx"
+        if self.inference_backend == "tensorrt":
+            if self.device != torch.device("cuda"):
+                raise (ValueError(f"Device {self.device} must be CUDA for TensorRT"))
+            self.providers = [
+                (
+                    "TensorrtExecutionProvider",
+                    {
+                        "trt_engine_cache_enable": True,
+                        "trt_engine_cache_path": ".tensorrtcache/",
+                    },
+                ),
+                "CUDAExecutionProvider",
+            ]
+        elif self.device == torch.device("cuda"):
+            self.providers = ["CUDAExecutionProvider"]
+        else:
+            self.providers = ["CPUExecutionProvider"]
+
+    def load_model(self):
+        logger.info("Loading model %s onto %s", self.model_name, self.device)
+        if self.session_path and self.providers:
+            self.session = onnxruntime.InferenceSession(
+                self.session_path, self.providers
+            )
+        else:
+            raise ValueError(
+                "Model path and inference backend must be provided for ONNX/TensorRT"
+            )
+        self.model_loaded = True
+        logger.info("Model %s loaded successfully", self.model_name)
+
+    def predict(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, float]:
+        if not self.model_loaded:
+            raise ValueError(
+                "Model is not loaded. Please load the model before doing predictions."
+            )
+
+        # Run in eval mode with no gradient computation
+        logger.debug("Starting prediction for %d input item(s)", len(inputs))
+        start_time = time.perf_counter()
+        outputs = self.session.run(None, {"pixel_values": inputs.numpy()})
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        logger.info("Prediction completed in %.3f ms", latency_ms)
+        return torch.from_numpy(outputs[0]), latency_ms
+
+
+InferenceBackendMapping = {
+    "torch": TorchModelManager,
+    "onnx": ONNXModelManager,
+    "tensort": ONNXModelManager,
+}

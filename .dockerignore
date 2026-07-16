@@ -25,6 +25,13 @@ MANIFEST
 htmlcov/
 .ruff_cache/
 
+# Data files
+data/
+tests/load/data
+tests/load/*.csv
+.onnx_models
+.tensorrtcache
+
 # Virtual environments
 venv/
 ENV/

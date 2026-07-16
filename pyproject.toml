@@ -25,12 +25,14 @@ gpu = [
     "torch",
     "torchvision",
     "torchaudio",
+    "onnxruntime-gpu"
 ]
 # Installs standard PyPI wheels (usually CPU or default fallback)
 cpu = [
     "torch",
     "torchvision",
     "torchaudio",
+    "onnxruntime"
 ]
 
 [tool.uv]
@@ -106,5 +108,6 @@ dev = [
     "black",
     "ruff",
     "pyright",
-    "locust"
+    "locust",
+    "pre-commit"
 ]

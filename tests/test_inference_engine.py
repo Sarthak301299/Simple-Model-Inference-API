@@ -249,9 +249,16 @@ def test_shutdown_signals_thread_and_cleans_model():
     )
 
 
-def test_shutdown_handles_full_queue_without_crashing():
+def test_shutdown_handles_full_queue_without_crashing(monkeypatch):
     engine = make_engine()
     engine.inference_queue = queue.Queue(maxsize=1)
+    # Hack to prevent waiting 2s since None is injected at guaranteed full queue.
+    original_put = queue.Queue.put
+
+    def custom_put(item, block=True, timeout=None):
+        return original_put(engine.inference_queue, item=item, block=block, timeout=0)
+
+    monkeypatch.setattr(engine.inference_queue, "put", custom_put)
     engine.inference_queue.put_nowait("full")
     engine.inference_thread = SimpleNamespace(
         join=lambda timeout=None: None, is_alive=lambda: False
@@ -267,9 +274,10 @@ def test_shutdown_handles_full_queue_without_crashing():
 
 def test_init_model_initializes_and_loads_model(monkeypatch):
     class FakeModelManager:
-        def __init__(self, model_name, inference_device, model_path):
+        def __init__(self, model_name, inference_device, model_path, inference_backend):
             self.model_name = model_name
             self.inference_device = inference_device
+            self.inference_backend = inference_backend
             self.model_loaded = False
 
         def load_model(self):
@@ -283,9 +291,17 @@ def test_init_model_initializes_and_loads_model(monkeypatch):
         INFERENCE_DEVICE="cpu",
         MODEL_PATH=None,
         MAX_CONCURRENT_REQUESTS=256,
+        INFERENCE_BACKEND="torch",
     )
 
-    monkeypatch.setattr("src.inference_engine.ModelManager", FakeModelManager)
+    monkeypatch.setattr(
+        "src.inference_engine.InferenceBackendMapping",
+        {
+            "torch": FakeModelManager,
+            "onnx": FakeModelManager,
+            "tensort": FakeModelManager,
+        },
+    )
 
     inf_engine = InferenceEngine(
         FakeConfig  # pyright: ignore [reportArgumentType] # type: ignore

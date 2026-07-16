@@ -1,0 +1,36 @@
+exclude: "^\
+  (third-party/.*)\
+  "
+repos:
+  - repo: local
+    hooks:
+      - id: Formatting
+        name: Run black to format files
+        entry: uv run black --check --diff src tests
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: Linting
+        name: Run ruff lint check
+        entry: uv run ruff check src tests
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: Type Check
+        name: Run pyright to check typing
+        entry: uv run pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: Testing and Coverage
+        name: Run pytest to use tests and generate coverage report
+        entry: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: Auditing
+        name: Run uv audit for a security audit
+        entry: uv run uv audit
+        language: system
+        types: [python]
+        pass_filenames: false

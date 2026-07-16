@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 from typing import Tuple, List
 from src.config import Config
-from src.model_manager import ModelManager
+from src.model_manager import InferenceBackendMapping
 from src.metrics import MODEL_READY, BATCH_SIZE, INFERENCE_LATENCY
 
 logging.basicConfig(
@@ -55,10 +55,12 @@ class InferenceEngine:
         """Initialize and load the image classification model into application state."""
         # Read the current configuration and create a model manager for the selected backend.
         try:
-            self.manager = ModelManager(
+            manager_cls = InferenceBackendMapping[self.config.INFERENCE_BACKEND]
+            self.manager = manager_cls(
                 self.config.MODEL_NAME,
                 self.config.INFERENCE_DEVICE,
                 self.config.MODEL_PATH,
+                self.config.INFERENCE_BACKEND,
             )
         except Exception as e:
             logger.error(

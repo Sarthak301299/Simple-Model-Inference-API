@@ -17,6 +17,7 @@ class Config:
     MODEL_NAME: str = "microsoft/resnet-50"
     MODEL_PATH: Optional[str] = None
     INFERENCE_DEVICE: str = "cuda"
+    INFERENCE_BACKEND: str = "torch"
     API_HOST: str = "0.0.0.0"
     API_KEY: Optional[str] = None
     API_PORT: int = 8000
@@ -44,6 +45,7 @@ class Config:
         model_name = os.getenv("MODEL_NAME", cls.MODEL_NAME)
         model_path = os.getenv("MODEL_PATH", cls.MODEL_PATH)
         inference_device = os.getenv("INFERENCE_DEVICE", cls.INFERENCE_DEVICE)
+        inference_backend = os.getenv("INFERENCE_BACKEND", cls.INFERENCE_BACKEND)
         api_host = os.getenv("API_HOST", cls.API_HOST)
         api_key = os.getenv("API_KEY", cls.API_KEY)
         api_port = int(os.getenv("API_PORT", cls.API_PORT))
@@ -94,6 +96,7 @@ class Config:
             MODEL_NAME=model_name,
             MODEL_PATH=model_path,
             INFERENCE_DEVICE=inference_device,
+            INFERENCE_BACKEND=inference_backend,
             API_HOST=api_host,
             API_KEY=api_key,
             API_PORT=api_port,
@@ -123,15 +126,24 @@ class Config:
             not isinstance(config.MODEL_NAME, str)
             or not config.MODEL_NAME
             or config.MODEL_NAME
-            not in ("microsoft/resnet-50", "google/mobilenet_v2_1.4_224")
+            not in (
+                "microsoft/resnet-50",
+                "google/mobilenet_v2_1.4_224",
+                "resnet-50",
+                "mobilenet_v2",
+            )
         ):
             raise ValueError(
-                'MODEL_NAME must be a non-empty string and one of "microsoft/resnet-50" or "google/mobilenet_v2_1.4_224".'
+                'MODEL_NAME must be a non-empty string and one of "microsoft/resnet-50", "google/mobilenet_v2_1.4_224", "resnet-50", or "mobilenet_v2".'
             )
         if config.MODEL_PATH is not None and not isinstance(config.MODEL_PATH, str):
             raise ValueError("MODEL_PATH must be a string or None.")
         if config.INFERENCE_DEVICE not in ("cpu", "cuda"):
-            raise ValueError('INFERENCE_DEVICE must be either "cpu" or "cuda".')
+            raise ValueError("INFERENCE_DEVICE must be either 'cpu' or 'cuda'.")
+        if config.INFERENCE_BACKEND not in ("torch", "onnx", "tensorrt"):
+            raise ValueError(
+                "INFERENCE_BACKEND must be either 'torch', 'onnx', or 'tensorrt'"
+            )
         if not isinstance(config.API_HOST, str) or not config.API_HOST:
             raise ValueError("API_HOST must be a non-empty string.")
         if config.API_KEY is not None and not isinstance(config.API_KEY, str):
@@ -195,6 +207,7 @@ class Config:
             "MODEL_NAME": self.MODEL_NAME,
             "MODEL_PATH": self.MODEL_PATH,
             "INFERENCE_DEVICE": self.INFERENCE_DEVICE,
+            "INFERENCE_BACKEND": self.INFERENCE_BACKEND,
             "API_HOST": self.API_HOST,
             "API_KEY": self.API_KEY,
             "API_PORT": self.API_PORT,

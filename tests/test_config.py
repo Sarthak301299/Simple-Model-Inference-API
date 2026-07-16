@@ -9,6 +9,7 @@ def make_config(**overrides):
         "MODEL_NAME": "microsoft/resnet-50",
         "MODEL_PATH": None,
         "INFERENCE_DEVICE": "cpu",
+        "INFERENCE_BACKEND": "torch",
         "API_HOST": "127.0.0.1",
         "API_KEY": None,
         "API_PORT": 8000,
@@ -62,6 +63,7 @@ def test_from_env_rejects_malformed_numeric_values(monkeypatch, env_key, env_val
 def test_from_env_debug_boolean_parsing(monkeypatch, env_value, expected):
     monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
     monkeypatch.setenv("INFERENCE_DEVICE", "cpu")
+    monkeypatch.setenv("INFERENCE_BACKEND", "torch")
     monkeypatch.setenv("DEBUG", env_value)
 
     assert Config.from_env().DEBUG is expected
@@ -70,12 +72,15 @@ def test_from_env_debug_boolean_parsing(monkeypatch, env_value, expected):
 def test_from_env_parses_remaining_runtime_controls(monkeypatch):
     monkeypatch.setattr("src.config.load_dotenv", lambda path: True)
     monkeypatch.setenv("INFERENCE_DEVICE", "cpu")
+    monkeypatch.setenv("INFERENCE_BACKEND", "torch")
     monkeypatch.setenv("MAX_CHUNK_SIZE_MB", "2")
     monkeypatch.setenv("BATCHING_TIMEOUT_MS", "4")
     monkeypatch.setenv("API_RETRY", "30")
 
     config = Config.from_env()
 
+    assert config.INFERENCE_DEVICE == "cpu"
+    assert config.INFERENCE_BACKEND == "torch"
     assert config.MAX_CHUNK_SIZE_MB == 2
     assert config.BATCHING_TIMEOUT_MS == 4
     assert config.API_RETRY == 30
@@ -128,6 +133,7 @@ def test_default_config_values(monkeypatch):
         "MODEL_NAME",
         "MODEL_PATH",
         "INFERENCE_DEVICE",
+        "INFERENCE_BACKEND",
         "API_HOST",
         "API_KEY",
         "API_PORT",
@@ -148,6 +154,7 @@ def test_default_config_values(monkeypatch):
     assert config.MODEL_NAME == "microsoft/resnet-50"
     assert config.MODEL_PATH is None
     assert config.INFERENCE_DEVICE == "cuda"
+    assert config.INFERENCE_BACKEND == "torch"
     assert config.API_HOST == "0.0.0.0"
     assert config.API_KEY is None
     assert config.API_PORT == 8000
@@ -171,6 +178,7 @@ def test_env_overrides_and_parsing(monkeypatch):
         "MODEL_NAME": "google/mobilenet_v2_1.4_224",
         "MODEL_PATH": "/tmp/model",
         "INFERENCE_DEVICE": "cpu",
+        "INFERENCE_BACKEND": "onnx",
         "API_HOST": "127.0.0.1",
         "API_KEY": "secret",
         "API_PORT": "12345",
@@ -195,6 +203,7 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.MODEL_NAME == env["MODEL_NAME"]
     assert config.MODEL_PATH == env["MODEL_PATH"]
     assert config.INFERENCE_DEVICE == env["INFERENCE_DEVICE"]
+    assert config.INFERENCE_BACKEND == env["INFERENCE_BACKEND"]
     assert config.API_HOST == env["API_HOST"]
     assert config.API_KEY == env["API_KEY"]
     assert config.API_PORT == 12345
@@ -231,6 +240,7 @@ def test_validate_accepts_valid_config():
         {"MODEL_NAME": "invalid-model"},
         {"MODEL_PATH": 123},
         {"INFERENCE_DEVICE": "tpu"},
+        {"INFERENCE_BACKEND": "backend"},
         {"API_HOST": ""},
         {"API_KEY": 12345},
         {"API_PORT": 0},
