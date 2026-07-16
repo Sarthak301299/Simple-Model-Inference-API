@@ -105,15 +105,16 @@ class InferenceEngine:
             try:
                 tensor = self.manager.preprocess_inputs(img)
             except Exception as e:
-                loops[i].call_soon_threadsafe(safely_fail_future, futures[i], e)
+                try:
+                    loops[i].call_soon_threadsafe(safely_fail_future, futures[i], e)
+                except Exception:
+                    continue
                 continue
             valid_tensors.append(tensor)
             valid_positions.append(i)
-
         if not valid_tensors:
             assert all(f.done() for f in futures)
             return None
-
         try:
             processed_image_batch = torch.cat(valid_tensors, dim=0)
             logits, inference_time_ms = self.manager.predict(processed_image_batch)
@@ -168,10 +169,13 @@ class InferenceEngine:
                 if first_item[0] is None or not self.config.validate_image(
                     first_item[0], self.config.MAX_IMAGE_DIMENSIONS
                 ):
-                    first_item[1].call_soon_threadsafe(
-                        first_item[2].set_exception,
-                        ValueError("Invalid Image Dimensions."),
-                    )
+                    try:
+                        first_item[1].call_soon_threadsafe(
+                            first_item[2].set_exception,
+                            ValueError("Invalid Image Dimensions."),
+                        )
+                    except Exception:
+                        continue
                     continue
                 else:
                     batch.append(first_item)
@@ -202,17 +206,18 @@ class InferenceEngine:
                     if item[0] is None or not self.config.validate_image(
                         item[0], self.config.MAX_IMAGE_DIMENSIONS
                     ):
-                        item[1].call_soon_threadsafe(
-                            item[2].set_exception,
-                            ValueError("Invalid Image Dimensions."),
-                        )
+                        try:
+                            item[1].call_soon_threadsafe(
+                                item[2].set_exception,
+                                ValueError("Invalid Image Dimensions."),
+                            )
+                        except Exception:
+                            continue
                         continue
                     batch.append(item)
                 except queue.Empty:
                     break
 
-            if not batch:
-                continue
             BATCH_SIZE.observe(len(batch))
             batch_inputs, loops, futures = map(list, zip(*batch))
             self.perform_inference(batch_inputs, loops, futures)

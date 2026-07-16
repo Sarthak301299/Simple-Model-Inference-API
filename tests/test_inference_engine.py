@@ -166,6 +166,87 @@ def test_perform_inference_isolates_preprocess_failure():
         close_future_loop(loop2)
 
 
+def test_perform_inference_handles_threadsafe_call_failure_batchfail(monkeypatch):
+    engine = make_engine()
+    good = Image.new("RGB", (1, 1))
+    bad = Image.new("RGB", (1, 1))
+    bad.should_fail_preprocess = (  # pyright: ignore [reportArgumentType] # type: ignore
+        True
+    )
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    loop1.close()
+    loop2.close()
+
+    def mockfail(valid_tensors, dim):
+        raise RuntimeError
+
+    monkeypatch.setattr("src.inference_engine.torch.cat", mockfail)
+    try:
+        engine.perform_inference(
+            [bad, good],
+            [
+                loop1,
+                loop2,
+            ],  # pyright: ignore [reportArgumentType] # type: ignore
+            [future1, future2],
+        )
+    except Exception:
+        pass
+
+
+def test_perform_inference_handles_threadsafe_call_failure_batchpass(monkeypatch):
+    engine = make_engine()
+    good1 = Image.new("RGB", (2, 2))
+    good2 = Image.new("RGB", (2, 2))
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    real_cat = torch.cat
+
+    def mockfail(valid_tensors, dim):
+        out = real_cat(valid_tensors, dim)
+        loop1.close()
+        return out
+
+    monkeypatch.setattr("src.inference_engine.torch.cat", mockfail)
+    try:
+        engine.perform_inference(
+            [good1, good2],
+            [
+                loop1,
+                loop2,
+            ],  # pyright: ignore [reportArgumentType] # type: ignore
+            [future1, future2],
+        )
+    finally:
+        close_future_loop(loop2)
+
+
+def test_perform_inference_returns_on_full_preprocess_failure():
+    engine = make_engine()
+    bad = Image.new("RGB", (1, 1))
+    bad.should_fail_preprocess = (  # pyright: ignore [reportArgumentType] # type: ignore
+        True
+    )
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    try:
+        engine.perform_inference(
+            [bad, bad],
+            [
+                ImmediateLoop(),
+                ImmediateLoop(),
+            ],  # pyright: ignore [reportArgumentType] # type: ignore
+            [future1, future2],
+        )
+
+        assert isinstance(future1.exception(), RuntimeError)
+        assert isinstance(future1.exception(), RuntimeError)
+    finally:
+        close_future_loop(loop1)
+        close_future_loop(loop2)
+
+
 @pytest.mark.parametrize("failure_attr", ["fail_predict", "fail_top_k"])
 def test_perform_inference_fails_valid_futures_when_batch_stage_fails(failure_attr):
     engine = make_engine()
@@ -210,6 +291,183 @@ def test_batch_processing_loop_processes_partial_batch_and_preserves_order():
         close_future_loop(loop2)
 
 
+def test_batch_processing_loop_processes_handles_non_nonfirst_item():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=3,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    try:
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future1))
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future2))
+        engine.inference_queue.put(None)
+
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+        assert future1.result() == ([("class", 0.0)], 5.0)
+        assert future2.result() == ([("class", 1.0)], 5.0)
+    finally:
+        close_future_loop(loop1)
+        close_future_loop(loop2)
+
+
+def test_batch_processing_loop_handles_negative_time_left():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=2,
+            BATCHING_TIMEOUT_MS=0,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    try:
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future1))
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future2))
+        engine.inference_queue.put(None)
+
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+        assert future1.result() == ([("class", 0.0)], 5.0)
+        assert future2.result() == ([("class", 0.0)], 5.0)
+    finally:
+        close_future_loop(loop1)
+        close_future_loop(loop2)
+
+
+def test_batch_processing_loop_handles_threadsafe_firstitem():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=2,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    loop1, future1 = new_future()
+    try:
+        engine.inference_queue.put((None, loop1, future1))
+        engine.inference_queue.put(None)
+
+        loop1.close()
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+        assert future1.result() == ([("class", 0.0)], 5.0)
+    except Exception:
+        pass
+
+
+def test_batch_processing_loop_handles_threadsafe_nonfirstitem():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=3,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    loop1, future1 = new_future()
+    loop2, future2 = new_future()
+    loop3, future3 = new_future()
+    try:
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future1))
+        engine.inference_queue.put((None, loop2, future2))
+        engine.inference_queue.put((None, loop3, future3))
+        engine.inference_queue.put(None)
+
+        loop3.close()
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+        assert future1.result() == ([("class", 0.0)], 5.0)
+    finally:
+        close_future_loop(loop1)
+        close_future_loop(loop2)
+
+
+def test_batch_processing_loop_handles_queue_empty():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=2,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    real_get = engine.inference_queue.get
+    counter = 0
+
+    def mock_get(block: bool = True, timeout: float | None = None):
+        nonlocal counter
+        try:
+            out = real_get(block=block, timeout=0)
+        except queue.Empty as e:
+            if counter > 0:
+                engine.inference_queue.put(None)
+            counter = counter + 1
+            raise e
+        return out
+
+    engine.inference_queue.get = mock_get
+    loop1, future1 = new_future()
+    try:
+        engine.inference_queue.put((Image.new("RGB", (1, 1)), loop1, future1))
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+    finally:
+        close_future_loop(loop1)
+
+
+def test_batch_processing_loop_handles_queue_empty_nonfirst():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=2,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    real_get = engine.inference_queue.get
+    counter = 0
+
+    def mock_get(block: bool = True, timeout: float | None = None):
+        nonlocal counter
+        try:
+            out = real_get(block=block, timeout=0)
+        except queue.Empty as e:
+            if counter > 0:
+                engine.inference_queue.put(None)
+            counter = counter + 1
+            raise e
+        return out
+
+    engine.inference_queue.get = mock_get
+
+    try:
+
+        engine.batch_processing_loop()
+
+        assert engine.ready is True
+    except Exception:
+        pass
+
+
 def test_batch_processing_loop_rejects_invalid_image_dimensions():
     engine = make_engine(
         SimpleNamespace(
@@ -237,6 +495,23 @@ def test_shutdown_signals_thread_and_cleans_model():
     engine = make_engine()
     engine.inference_thread = SimpleNamespace(
         join=lambda timeout=None: joined.append(timeout), is_alive=lambda: False
+    )  # pyright: ignore [reportArgumentType] # type: ignore
+
+    engine.shutdown()
+
+    assert engine.shutdown_event.is_set()
+    assert joined == [5.0]
+    assert (
+        engine.manager.cleaned  # pyright: ignore [reportArgumentType] # type: ignore
+        is True
+    )
+
+
+def test_shutdown_signals_thread_exit_with_leaks():
+    joined = []
+    engine = make_engine()
+    engine.inference_thread = SimpleNamespace(
+        join=lambda timeout=None: joined.append(timeout), is_alive=lambda: True
     )  # pyright: ignore [reportArgumentType] # type: ignore
 
     engine.shutdown()
