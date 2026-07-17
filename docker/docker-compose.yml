@@ -1,17 +1,8 @@
 version: '3.8'
 
 services:
-  init-volume:
-    image: alpine
-    volumes:
-      - model-cache:/home/modelapi/.cache/huggingface
-      - onnx_models:/app/onnx_models
-    command: sh -c "chown -R modelapi:modelapi /home/modelapi/.cache/huggingface /app/onnx_models"
   model-api:
     image: simple-model-inference-api:cpu
-    depends_on:
-      init-volume:
-        condition: service_completed_successfully
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -29,7 +20,7 @@ services:
       # container unreachable despite the published port mapping.
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - HF_HOME=/home/modelapi/.cache/huggingface
+      - HF_HOME=/app/huggingface
       # Fixed to match this image's installed dependencies: The CPU image has
       # no CUDA-enabled torch wheels, so this must stay "cpu" regardless of .env.
       # docker-compose.gpu.yml overrides this to "cuda" for the GPU image, which does
@@ -38,7 +29,7 @@ services:
       # Everything else (MODEL_NAME, MAX_BATCH_SIZE, API_KEY, ...) comes from
       # ../.env via env_file — add/change values there, no edits needed here.
     volumes:
-      - model-cache:/home/modelapi/.cache/huggingface
+      - model-cache:/app/huggingface
       - onnx_models:/app/onnx_models
     restart: unless-stopped
     healthcheck:
