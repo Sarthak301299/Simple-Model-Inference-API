@@ -690,7 +690,7 @@ def test_get_model_info():
     assert info["name"] == "microsoft/resnet-50"
 
 
-def test_cleanup_backend_fallback_works():
+def test_cleanup_backend_fallback_works(monkeypatch):
     class MockModelManager(ModelManager):
         def load_model(self):
             pass
@@ -698,6 +698,8 @@ def test_cleanup_backend_fallback_works():
         def predict(self, inputs):
             return inputs
 
+    monkeypatch.setattr("src.model_manager.torch.cuda.empty_cache", lambda: None)
+    monkeypatch.setattr("src.model_manager.torch.cuda.synchronize", lambda: None)
     manager = MockModelManager()
     manager._cleanup_backend()
 
