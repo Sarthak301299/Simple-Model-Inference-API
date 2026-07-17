@@ -60,10 +60,12 @@ jobs:
       - name: Install export dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: uv sync --extra cpu --no-dev
-      - name: Export and verify parity
+      - name: Export ONNX and config files
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           uv run python -m scripts.export_onnx
+        env:
+          MODEL_PATH: ".onnx_models"
       - name: Upload ONNX artifact
         uses: actions/upload-artifact@v7
         with:
@@ -159,7 +161,7 @@ jobs:
           secret: ${{ github.TOKEN }}
           approvers: Sarthak301299
           minimum-approvals: 1
-          issue-title: "Manual Approval Required for Docker Build"
+          issue-title: "Manual Approval Required for Docker Build with ONNX"
           issue-body: "Please approve or deny the deployment."
       - name: Check out repository code
         uses: actions/checkout@v7
@@ -189,7 +191,7 @@ jobs:
       - name: Start container for a smoke test
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
-          -e API_KEY= -e INFERENCE_BACKEND=onnx \
+          -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=.onnx_models \
           -v model-cache:/home/modelapi/.cache/huggingface \
           -v .onnx_models:/app/.onnx_models \
           simple-model-inference-api:cpuci
