@@ -73,6 +73,7 @@ jobs:
           name: onnx-model-resnet50
           path: |
             onnx_models/microsoft-resnet-50.onnx
+            onnx_models/microsoft-resnet-50.onnx.data
             onnx_models/microsoft-resnet-50_config.json
 
   build:
