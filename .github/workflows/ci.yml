@@ -39,6 +39,7 @@ jobs:
     name: Export ONNX model
     runs-on: ubuntu-latest
     needs: test
+    if: success()
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
@@ -75,9 +76,35 @@ jobs:
             onnx_models/microsoft-resnet-50_config.json
 
   build:
-    name: Docker Build
+    name: Docker Build and Upload image
     runs-on: ubuntu-latest
     needs: test
+    if: success()
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build Docker Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: simple-model-inference-api:cpuci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: EXTRA=cpu
+          outputs: type=docker, dest=/tmp/simple-model-inference-api.tar
+      - name: Upload Docker Image
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-image-artifact
+          path: /tmp/simple-model-inference-api.tar
+          retention-days: 1
+  execute:
+    name: Run docker image with torch and ONNX
+    runs-on: ubuntu-latest
+    needs: [export-onnx, build]
     if: success()
     permissions:
       issues: write
@@ -89,30 +116,43 @@ jobs:
           secret: ${{ github.TOKEN }}
           approvers: Sarthak301299
           minimum-approvals: 1
-          issue-title: "Manual Approval Required for Docker Build"
+          issue-title: "Manual Approval Required for Docker Build with ONNX"
           issue-body: "Please approve or deny the deployment."
       - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Build Docker Image
-        uses: docker/build-push-action@v7
+        uses: actions/checkout@v7
+      - name: Download ONXX model
+        uses: actions/download-artifact@v8
         with:
-          context: .
-          file: docker/Dockerfile
-          tags: simple-model-inference-api:cpuci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: EXTRA=cpu
+          name: onnx-model-resnet50
+          path: onnx_models
+      - name: Download Docker image
+        uses: actions/download-artifact@v8
+        with:
+          name: docker-image-artifact
+          path: /tmp
+      - name: Load Docker image
+        run: |
+          docker load --input /tmp/simple-model-inference-api.tar
+          docker image ls
       - name: Verify torch is actually installed
         run: |
           docker run --rm simple-model-inference-api:cpuci \
           python -c "import torch; print('torch', torch.__version__, 'OK')"
-      - name: Start container for a smoke test
+      - name: Initialize Docker volume directory
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/model-cache
+      - name: Give volume permissions
+        run: |
+          docker run --rm alpine \
+          -v $GITHUB_WORKSPACE/model-cache:/home/modelapi/.cache/huggingface \
+          -v $GITHUB_WORKSPACE/onnx_models:/app/onnx_models \
+          alpine sh -c "chown -R modelapi:modelapi /home/modelapi/.cache/huggingface /app/onnx_models"
+      - name: Start container for a smoke test (Torch)
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
-          -e API_KEY= \
+          -e API_KEY= -e INFERENCE_BACKEND=torch \
+          -v model-cache:/home/modelapi/.cache/huggingface \
+          -v $GITHUB_WORKSPACE/onnx_models:/app/onnx_models \
           simple-model-inference-api:cpuci
       - name: Wait for /health/live
         run: |
@@ -140,65 +180,10 @@ jobs:
           echo "Service did not become ready in time"
           docker logs smoke-test
           exit 1
-      - name: Dump container logs
-        if: always()
-        run: docker logs smoke-test || true
-      - name: Stop and remove smoke test container
-        if: always()
-        run: docker rm -f smoke-test || true
-  build-onnx:
-    name: Docker Build with ONNX
-    runs-on: ubuntu-latest
-    needs: export-onnx
-    if: success()
-    permissions:
-      issues: write
-      contents: read
-    steps:
-      - name: Manual Approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: Sarthak301299
-          minimum-approvals: 1
-          issue-title: "Manual Approval Required for Docker Build with ONNX"
-          issue-body: "Please approve or deny the deployment."
-      - name: Check out repository code
-        uses: actions/checkout@v7
-      - name: Download ONXX model
-        uses: actions/download-artifact@v8
-        with:
-          name: onnx-model-resnet50
-          path: onnx_models
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-      - name: Build Docker Image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile
-          tags: simple-model-inference-api:cpuci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: EXTRA=cpu
-      - name: Verify torch is actually installed
+      - name: Stop Running container
         run: |
-          docker run --rm simple-model-inference-api:cpuci \
-          python -c "import torch; print('torch', torch.__version__, 'OK')"
-      - name: Initialize Docker volumes
-        run: |
-          docker volume create $GITHUB_WORKSPACE/model-cache
-          docker volume create $GITHUB_WORKSPACE/onnx_models
-      - name: Give volume permissions
-        run: |
-          docker run --rm alpine \
-          -v $GITHUB_WORKSPACE/model-cache:/home/modelapi/.cache/huggingface \
-          -v $GITHUB_WORKSPACE/onnx_models:/app/onnx_models \
-          alpine sh -c "chown -R modelapi:modelapi /home/modelapi/.cache/huggingface /app/onnx_models"
-      - name: Start container for a smoke test
+          docker stop smoke-test
+      - name: Start container for a smoke test (ONNX)
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
           -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=/app/onnx_models \
