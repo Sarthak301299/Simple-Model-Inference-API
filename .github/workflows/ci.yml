@@ -191,9 +191,9 @@ jobs:
       - name: Start container for a smoke test
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
-          -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=onnx_models \
+          -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=/app/onnx_models \
           -v model-cache:/home/modelapi/.cache/huggingface \
-          -v onnx_models:/app/onnx_models \
+          -v $GITHUB_WORKSPACE/onnx_models:/app/onnx_models \
           simple-model-inference-api:cpuci
       - name: Wait for /health/live
         run: |
