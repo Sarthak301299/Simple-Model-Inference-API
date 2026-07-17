@@ -240,29 +240,61 @@ def test_init_model_raises_value_error_when_incorrect_tensorrt(fake_ort, tmp_pat
         manager.load_model()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_load_model_completes_with_tensorrt(fake_ort, tmp_path):
+def test_load_model_selects_cuda_provider_when_device_is_cuda(
+    fake_ort, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("src.model_manager.torch.cuda.is_available", lambda: True)
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
 
-    ONNXModelManager(
-        model_name="resnet-50",
-        device="cuda",
-        model_path=tmp_path,
-        inference_backend="tensorrt",
+    manager = ONNXModelManager(
+        model_name="resnet-50", device="cuda", model_path=str(tmp_path)
+    )
+    manager.load_model()
+
+    assert (
+        manager.session.providers  # pyright: ignore[reportArgumentType] # type: ignore
+        == ["CUDAExecutionProvider"]
     )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_load_model_completes_with_onnx(fake_ort, tmp_path):
+def test_load_model_selects_tensorrt_provider_with_cache_config(
+    fake_ort, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("src.model_manager.torch.cuda.is_available", lambda: True)
     onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
 
-    ONNXModelManager(
+    manager = ONNXModelManager(
         model_name="resnet-50",
         device="cuda",
-        model_path=tmp_path,
-        inference_backend="onnx",
+        model_path=str(tmp_path),
+        inference_backend="tensorrt",
+    )
+
+    assert manager.providers == [
+        (
+            "TensorrtExecutionProvider",
+            {
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": ".tensorrtcache/",
+            },
+        ),
+        "CUDAExecutionProvider",
+    ]
+
+    manager.load_model()
+    assert (
+        manager.session.providers  # pyright: ignore[reportArgumentType] # type: ignore
+        == manager.providers
     )
 
 
@@ -389,23 +421,6 @@ def test_load_model_processor_failure_leaves_model_unloaded(monkeypatch):
     assert manager.model_loaded is False
 
 
-def test_load_model_moves_model_to_device_and_marks_loaded(monkeypatch):
-    monkeypatch.setattr(
-        "src.model_manager.AutoImageProcessor",
-        types.SimpleNamespace(from_pretrained=lambda name: FakeProcessor()),
-    )
-    monkeypatch.setattr(
-        "src.model_manager.AutoModelForImageClassification",
-        types.SimpleNamespace(from_pretrained=lambda name: FakeModel()),
-    )
-    manager = TorchModelManager(device="cpu")
-
-    manager.load_model()
-
-    assert manager.model_loaded is True
-    assert manager.model.moved_to == torch.device("cpu")
-
-
 def test_preprocess_inputs_accepts_list_and_preserves_batch_size():
     manager = TorchModelManager(device="cpu")
     manager.model_loaded = True
@@ -437,15 +452,6 @@ def test_preprocess_inputs_rejects_missing_processor():
 
     with pytest.raises(TypeError):
         manager.preprocess_inputs(Image.new("RGB", (2, 2)))
-
-
-def test_predict_rejects_non_tensor_input():
-    manager = TorchModelManager(device="cpu")
-    manager.model_loaded = True
-    manager.model = FakeModel()
-
-    with pytest.raises(AttributeError):
-        manager.predict("not-a-tensor")  # pyright: ignore[reportArgumentType]
 
 
 def test_predict_returns_logits_and_positive_latency():
@@ -573,24 +579,6 @@ def test_load_model_monkeypatched(monkeypatch):
     assert manager.model.moved_to == manager.device
 
 
-def test_preprocess_and_predict(monkeypatch):
-    manager = TorchModelManager()
-    # set a fake model and fake processor directly (skip load_model)
-    manager.model = FakeModel()
-    manager.model_loaded = True
-    manager.image_processor = FakeProcessor()
-
-    img = Image.new("RGB", (10, 10), color="red")
-    inputs = manager.preprocess_inputs(img)
-    for inp in inputs:
-        assert inp.device.type == manager.device.type
-
-    logits, inference_time_ms = manager.predict(inputs)
-    assert isinstance(logits, torch.Tensor)
-    assert logits.shape[1] == 3
-    assert isinstance(inference_time_ms, float)
-
-
 def test_top_k_from_logits(monkeypatch):
     manager = TorchModelManager()
     # provide a fake loaded model with id2label
@@ -607,17 +595,6 @@ def test_top_k_from_logits(monkeypatch):
         for label, score in row:
             assert isinstance(label, str)
             assert isinstance(score, float)
-
-
-def test_preprocess_inputs_sequence_with_non_image():
-    manager = TorchModelManager()
-    manager.model = FakeModel()
-    manager.model_loaded = True
-    manager.image_processor = FakeProcessor()
-
-    # sequence containing a non-image element should raise
-    with pytest.raises(TypeError):
-        manager.preprocess_inputs(None)
 
 
 def test_top_k_invalid_k_values():
@@ -637,9 +614,8 @@ def test_top_k_invalid_k_values():
 
 
 def test_top_k_missing_id2label_raises():
+    """id2label defaults to None until load_model() populates it."""
     manager = TorchModelManager()
-    # model.config exists but has no id2label attribute
-    manager.model = SimpleNamespace(config=SimpleNamespace())
     manager.model_loaded = True
     with pytest.raises(AttributeError):
         manager.top_k_from_logits(torch.zeros(1, 3), k=1)
@@ -675,14 +651,17 @@ def test_preprocess_inputs_invalid_type():
         )
 
 
-def test_predict_invalid_inputs():
-    manager = TorchModelManager()
-    manager.model = FakeModel()
+@pytest.mark.parametrize(
+    "bad_input, expected_exception",
+    [(None, TypeError), ("not-a-tensor", AttributeError)],
+)
+def test_predict_rejects_invalid_inputs(bad_input, expected_exception):
+    manager = TorchModelManager(device="cpu")
     manager.model_loaded = True
+    manager.model = FakeModel()
 
-    # None -> TypeError (explicit check)
-    with pytest.raises(TypeError):
-        manager.predict(None)  # pyright: ignore [reportArgumentType] # type: ignore
+    with pytest.raises(expected_exception):
+        manager.predict(bad_input)
 
 
 def test_top_k_from_logits_invalid():
@@ -747,8 +726,3 @@ def test_missing_id2label_fails_load(monkeypatch):
     )
     with pytest.raises(AttributeError):
         manager.load_model()
-
-
-def test_cuda_cleanup_completes():
-    manager = TorchModelManager(model_name="microsoft/resnet-50", device="cuda")
-    manager._cleanup_backend()

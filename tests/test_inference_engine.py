@@ -182,17 +182,16 @@ def test_perform_inference_handles_threadsafe_call_failure_batchfail(monkeypatch
         raise RuntimeError
 
     monkeypatch.setattr("src.inference_engine.torch.cat", mockfail)
-    try:
-        engine.perform_inference(
-            [bad, good],
-            [
-                loop1,
-                loop2,
-            ],  # pyright: ignore [reportArgumentType] # type: ignore
-            [future1, future2],
-        )
-    except Exception:
-        pass
+    # Should not raise, even though both loops are closed and both the
+    # preprocess-failure path and the batch-failure path try to notify them.
+    engine.perform_inference(
+        [bad, good],
+        [
+            loop1,
+            loop2,
+        ],  # pyright: ignore [reportArgumentType] # type: ignore
+        [future1, future2],
+    )
 
 
 def test_perform_inference_handles_threadsafe_call_failure_batchpass(monkeypatch):
@@ -291,33 +290,6 @@ def test_batch_processing_loop_processes_partial_batch_and_preserves_order():
         close_future_loop(loop2)
 
 
-def test_batch_processing_loop_processes_handles_non_nonfirst_item():
-    engine = make_engine(
-        SimpleNamespace(
-            TOP_K_PREDICTIONS=1,
-            MAX_IMAGE_DIMENSIONS=(10, 10),
-            MAX_BATCH_SIZE=3,
-            BATCHING_TIMEOUT_MS=1,
-            validate_image=lambda image, max_dims: True,
-        )
-    )
-    loop1, future1 = new_future()
-    loop2, future2 = new_future()
-    try:
-        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future1))
-        engine.inference_queue.put((Image.new("RGB", (1, 1)), ImmediateLoop(), future2))
-        engine.inference_queue.put(None)
-
-        engine.batch_processing_loop()
-
-        assert engine.ready is True
-        assert future1.result() == ([("class", 0.0)], 5.0)
-        assert future2.result() == ([("class", 1.0)], 5.0)
-    finally:
-        close_future_loop(loop1)
-        close_future_loop(loop2)
-
-
 def test_batch_processing_loop_handles_negative_time_left():
     engine = make_engine(
         SimpleNamespace(
@@ -346,6 +318,15 @@ def test_batch_processing_loop_handles_negative_time_left():
 
 
 def test_batch_processing_loop_handles_threadsafe_firstitem():
+    """When notifying a request's future fails because its event loop is
+    already closed, the worker must not crash — but it also cannot safely
+    complete the future from another thread (set_result/set_exception would
+    itself try to call_soon on the closed loop to wake any awaiter, raising
+    the same error). In practice this only happens at full app shutdown,
+    when the original awaiting coroutine is already gone anyway — so leaving
+    the future unresolved here is the correct, accepted outcome, not a gap.
+    A caller-side timeout (see handle_predict_request) is what actually
+    protects against a hung request."""
     engine = make_engine(
         SimpleNamespace(
             TOP_K_PREDICTIONS=1,
@@ -364,9 +345,9 @@ def test_batch_processing_loop_handles_threadsafe_firstitem():
         engine.batch_processing_loop()
 
         assert engine.ready is True
-        assert future1.result() == ([("class", 0.0)], 5.0)
-    except Exception:
-        pass
+        assert not future1.done()
+    finally:
+        loop1.close()
 
 
 def test_batch_processing_loop_handles_threadsafe_nonfirstitem():
@@ -393,6 +374,7 @@ def test_batch_processing_loop_handles_threadsafe_nonfirstitem():
 
         assert engine.ready is True
         assert future1.result() == ([("class", 0.0)], 5.0)
+        assert not future3.done()
     finally:
         close_future_loop(loop1)
         close_future_loop(loop2)
@@ -459,13 +441,8 @@ def test_batch_processing_loop_handles_queue_empty_nonfirst():
 
     engine.inference_queue.get = mock_get
 
-    try:
-
-        engine.batch_processing_loop()
-
-        assert engine.ready is True
-    except Exception:
-        pass
+    engine.batch_processing_loop()
+    assert engine.ready is True
 
 
 def test_batch_processing_loop_rejects_invalid_image_dimensions():

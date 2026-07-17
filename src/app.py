@@ -20,6 +20,8 @@ import io
 import queue
 import hmac
 import time
+import asyncio
+import uvicorn
 from src.config import Config
 from src.inference_engine import InferenceEngine
 from collections.abc import AsyncGenerator
@@ -267,8 +269,8 @@ async def handle_predict_request(
 
     # Another check before enqueuing to account for the queue filling up during read.
     try:
-        result: Tuple[List[Tuple[str, float]], float] = await engine.EnqueueRequest(
-            image
+        result: Tuple[List[Tuple[str, float]], float] = await asyncio.wait_for(
+            engine.EnqueueRequest(image), timeout=app.state.config.INFERENCE_TIMEOUT
         )
     except queue.Full:
         REJECTED_COUNT.inc()
@@ -276,6 +278,10 @@ async def handle_predict_request(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Inference Queue is full",
             headers={"Retry-After": str(app.state.config.API_RETRY)},
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Inference timed out."
         )
     return {"prediction": result[0], "inference_time_ms": result[1]}
 
@@ -286,12 +292,15 @@ def read_root() -> Dict[str, str]:
     return {"message": "Hello World"}
 
 
-if __name__ == "__main__":
-    import uvicorn
-
+def main() -> None:
+    """Entry point for running the app directly (e.g. `python -m src.app`)."""
     uvicorn.run(
         app,
         host=app.state.config.API_HOST,
         port=app.state.config.API_PORT,
         log_level=app.state.config.LOG_LEVEL,
     )
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover

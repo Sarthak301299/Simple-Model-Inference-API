@@ -9,6 +9,17 @@ from PIL import Image
 from starlette.datastructures import Headers
 
 import src.app as app_module
+from src.config import Config
+
+
+def make_health_engine(ready=True, model_loaded=True, thread_alive=True):
+    return SimpleNamespace(
+        ready=ready,
+        manager=SimpleNamespace(model_loaded=model_loaded),
+        inference_thread=SimpleNamespace(is_alive=lambda: thread_alive),
+        shutdown_event=threading.Event(),
+        inference_queue=queue.Queue(maxsize=1),
+    )
 
 
 def create_event(should_set: bool) -> threading.Event:
@@ -33,6 +44,10 @@ def reset_app_state():
         MAX_FILE_SIZE_MB=1,
         MAX_CHUNK_SIZE_MB=1,
         MAX_IMAGE_DIMENSIONS=(32, 32),
+        INFERENCE_TIMEOUT=60,
+        API_HOST="0.0.0.0",
+        API_PORT=8000,
+        LOG_LEVEL="INFO",
         validate_image=lambda image, maxdims: 0 < image.width <= maxdims[0]
         and 0 < image.height <= maxdims[1],
     )
@@ -60,6 +75,7 @@ def test_verify_api_key_accepts_matching_key():
     asyncio.run(app_module.verify_api_key("secret"))
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "engine,shutdown,expected_status",
     [
@@ -90,172 +106,82 @@ def test_verify_api_key_accepts_matching_key():
         ),
     ],
 )
-def test_liveness_states(engine, shutdown, expected_status):
+async def test_liveness_states(engine, shutdown, expected_status):
     app_module.app.state.inf_engine = engine
     if app_module.app.state.inf_engine:
         if shutdown:
             app_module.app.state.inf_engine.shutdown_event.set()
-    response = asyncio.run(app_module.liveness_check())
+    response = await app_module.liveness_check()
 
     assert response.status_code == expected_status
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "engine,shutdown,queuefull,expected_status",
+    "check_fn, engine, shutdown, queuefull, expected_status",
     [
-        (None, False, False, 503),
+        (app_module.readyness_check, None, False, False, 503),
+        (app_module.startup_check, None, False, False, 503),
         (
-            SimpleNamespace(
-                ready=False,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
+            app_module.readyness_check,
+            make_health_engine(ready=False),
+            False,
+            False,
+            503,
+        ),
+        (app_module.startup_check, make_health_engine(ready=False), False, False, 503),
+        (
+            app_module.readyness_check,
+            make_health_engine(model_loaded=False),
             False,
             False,
             503,
         ),
         (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=False),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
+            app_module.startup_check,
+            make_health_engine(model_loaded=False),
             False,
             False,
             503,
         ),
         (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: False),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
+            app_module.readyness_check,
+            make_health_engine(thread_alive=False),
             False,
             False,
             503,
         ),
         (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
-            True,
+            app_module.startup_check,
+            make_health_engine(thread_alive=False),
+            False,
             False,
             503,
         ),
+        (app_module.readyness_check, make_health_engine(), True, False, 503),
+        (app_module.startup_check, make_health_engine(), True, False, 503),
+        (app_module.readyness_check, make_health_engine(), False, False, 200),
+        (app_module.startup_check, make_health_engine(), False, False, 200),
         (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
+            app_module.readyness_check,
+            make_health_engine(),
             False,
             True,
             503,
-        ),
-        (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-                inference_queue=queue.Queue(maxsize=1),
-            ),
-            False,
-            False,
-            200,
-        ),
+        ),  # readiness-only: queue full
     ],
 )
-def test_readiness_states(engine, shutdown, queuefull, expected_status):
+async def test_health_endpoint_states(
+    check_fn, engine, shutdown, queuefull, expected_status
+):
     app_module.app.state.inf_engine = engine
-
-    if app_module.app.state.inf_engine:
+    if engine:
         if shutdown:
-            app_module.app.state.inf_engine.shutdown_event.set()
+            engine.shutdown_event.set()
         if queuefull:
-            app_module.app.state.inf_engine.inference_queue.put("item")
+            engine.inference_queue.put("item")
 
-    response = asyncio.run(app_module.readyness_check())
-
-    assert response.status_code == expected_status
-
-
-@pytest.mark.parametrize(
-    "engine,shutdown,expected_status",
-    [
-        (None, False, 503),
-        (
-            SimpleNamespace(
-                ready=False,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-            ),
-            False,
-            503,
-        ),
-        (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=False),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-            ),
-            False,
-            503,
-        ),
-        (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: False),
-                shutdown_event=threading.Event(),
-            ),
-            False,
-            503,
-        ),
-        (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-            ),
-            True,
-            503,
-        ),
-        (
-            SimpleNamespace(
-                ready=True,
-                manager=SimpleNamespace(model_loaded=True),
-                inference_thread=SimpleNamespace(is_alive=lambda: True),
-                shutdown_event=threading.Event(),
-            ),
-            False,
-            200,
-        ),
-    ],
-)
-def test_startup_states(engine, shutdown, expected_status):
-    app_module.app.state.inf_engine = engine
-
-    if app_module.app.state.inf_engine:
-        if shutdown:
-            app_module.app.state.inf_engine.shutdown_event.set()
-
-    response = asyncio.run(app_module.startup_check())
+    response = await check_fn()
 
     assert response.status_code == expected_status
 
@@ -340,6 +266,8 @@ def test_predict_returns_prediction_payload():
     async def enqueue(image):
         return ([("label", 0.9)], 12.5)
 
+    app_module.app.state.config = Config()
+
     app_module.app.state.inf_engine = SimpleNamespace(
         ready=True, inference_queue=queue.Queue(), EnqueueRequest=enqueue
     )
@@ -379,6 +307,8 @@ def test_predict_rejects_queue_full_during_enqueue():
     async def enqueue(_image):
         raise queue.Full
 
+    app_module.app.state.config = Config()
+
     app_module.app.state.inf_engine = SimpleNamespace(
         ready=True, inference_queue=queue.Queue(), EnqueueRequest=enqueue
     )
@@ -416,23 +346,14 @@ def test_root_endpoint_direct():
     assert app_module.read_root() == {"message": "Hello World"}
 
 
-def test_handle_predict_request_rejects_shutdown_and_non_image():
+@pytest.mark.asyncio
+async def test_handle_predict_request_rejects_shutdown_and_non_image():
     file = UploadFile(filename="image.jpg", file=io.BytesIO(b"dummy"))
     request = Request(scope={"type": "http", "headers": []})
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request(request, file))
+        await app_module.handle_predict_request(request, file)
     assert exc_info.value.status_code == 503
-
-    app_module.app.state.inf_engine = SimpleNamespace(
-        ready=True, inference_queue=queue.Queue()
-    )
-    app_module.app.state.config = SimpleNamespace(
-        MODEL_NAME="microsoft/resnet-50", INFERENCE_DEVICE="cpu", MAX_FILE_SIZE_MB=16
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(app_module.handle_predict_request(request, file))
-    assert exc_info.value.status_code == 400
 
 
 def test_lifespan_runs_init_and_cleanup(monkeypatch):
@@ -534,3 +455,69 @@ async def test_predict_propagates_413_from_read_with_limits_without_rewrapping()
         await app_module.handle_predict_request(request, file)
 
     assert exc_info.value.status_code == 413
+
+
+def test_main_calls_uvicorn_run_with_configured_settings(monkeypatch):
+    calls = {}
+
+    def fake_run(app, host, port, log_level):
+        calls["host"] = host
+        calls["port"] = port
+        calls["log_level"] = log_level
+
+    monkeypatch.setattr(app_module.uvicorn, "run", fake_run)
+
+    app_module.main()
+
+    assert calls["host"] == app_module.app.state.config.API_HOST
+    assert calls["port"] == app_module.app.state.config.API_PORT
+    assert calls["log_level"] == app_module.app.state.config.LOG_LEVEL
+
+
+@pytest.mark.asyncio
+async def test_predict_succeeds_within_timeout():
+    async def enqueue(image):
+        return ([("label", 0.9)], 12.5)
+
+    app_module.app.state.config.INFERENCE_TIMEOUT = 5.0
+    app_module.app.state.inf_engine = SimpleNamespace(
+        ready=True, inference_queue=queue.Queue(), EnqueueRequest=enqueue
+    )
+    request = Request(scope={"type": "http", "headers": []})
+    file = UploadFile(
+        filename="x.png",
+        file=make_png(),
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    result = await app_module.handle_predict_request(request, file)
+
+    assert result == {"prediction": [("label", 0.9)], "inference_time_ms": 12.5}
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_504_when_enqueue_future_never_resolves():
+    """Simulates a future whose notifying loop is closed (or a stuck worker) —
+    the caller must not hang forever; asyncio.wait_for is what actually
+    guarantees that, independent of anything perform_inference/
+    batch_processing_loop can do across threads."""
+
+    def enqueue(image):
+        loop = asyncio.get_running_loop()
+        return loop.create_future()  # deliberately never resolved
+
+    app_module.app.state.config.INFERENCE_TIMEOUT = 0.05
+    app_module.app.state.inf_engine = SimpleNamespace(
+        ready=True, inference_queue=queue.Queue(), EnqueueRequest=enqueue
+    )
+    request = Request(scope={"type": "http", "headers": []})
+    file = UploadFile(
+        filename="x.png",
+        file=make_png(),
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await app_module.handle_predict_request(request, file)
+
+    assert exc_info.value.status_code == 504

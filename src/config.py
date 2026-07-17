@@ -35,6 +35,7 @@ class Config:
     MAX_BATCH_SIZE: int = 64
     BATCHING_TIMEOUT_MS: int = 3
     API_RETRY: int = 5
+    INFERENCE_TIMEOUT: int = 60
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -91,6 +92,7 @@ class Config:
             os.getenv("BATCHING_TIMEOUT_MS", cls.BATCHING_TIMEOUT_MS)
         )
         api_retry = int(os.getenv("API_RETRY", cls.API_RETRY))
+        inference_timeout = int(os.getenv("INFERENCE_TIMEOUT", cls.INFERENCE_TIMEOUT))
 
         config = cls(
             MODEL_NAME=model_name,
@@ -114,6 +116,7 @@ class Config:
             MAX_BATCH_SIZE=max_batch_size,
             BATCHING_TIMEOUT_MS=batching_timeout_ms,
             API_RETRY=api_retry,
+            INFERENCE_TIMEOUT=inference_timeout,
         )
 
         cls.validate(config)
@@ -200,6 +203,10 @@ class Config:
             raise ValueError(
                 "API_RETRY must be a positive integer less than or equal to 60."
             )
+        if not (0 < config.INFERENCE_TIMEOUT <= 600):
+            raise ValueError(
+                "INFERENCE_TIMEOUT must be a positive integer less than or equal to 600."
+            )
 
     def to_dict(self) -> dict:
         """Convert the configuration parameters to a dictionary for easy access and manipulation."""
@@ -225,6 +232,7 @@ class Config:
             "MAX_BATCH_SIZE": self.MAX_BATCH_SIZE,
             "BATCHING_TIMEOUT_MS": self.BATCHING_TIMEOUT_MS,
             "API_RETRY": self.API_RETRY,
+            "INFERENCE_TIMEOUT": self.INFERENCE_TIMEOUT,
         }
 
     def validate_image(self, image: Image.Image, max_dims: Tuple[int, int]) -> bool:

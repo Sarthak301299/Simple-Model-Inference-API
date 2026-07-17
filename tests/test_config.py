@@ -27,6 +27,7 @@ def make_config(**overrides):
         "MAX_BATCH_SIZE": 32,
         "BATCHING_TIMEOUT_MS": 3,
         "API_RETRY": 5,
+        "INFERENCE_TIMEOUT": 60,
     }
     return Config(**{**defaults, **overrides})
 
@@ -100,22 +101,6 @@ def test_from_env_parses_remaining_runtime_controls(monkeypatch):
 )
 def test_validate_accepts_boundary_values(kwargs):
     Config.validate(make_config(**kwargs))
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"MAX_IMAGE_DIMENSIONS": (100, "large")},
-        {"MODEL_INPUT_SHAPE": (None, 3, "wide", 224)},
-        {"MAX_CONCURRENT_REQUESTS": 0},
-        {"MAX_BATCH_SIZE": 0},
-        {"BATCHING_TIMEOUT_MS": 0},
-        {"API_RETRY": 61},
-    ],
-)
-def test_validate_rejects_additional_invalid_values(kwargs):
-    with pytest.raises((TypeError, ValueError)):
-        Config.validate(make_config(**kwargs))
 
 
 def test_validate_image_boundaries():
@@ -250,19 +235,27 @@ def test_validate_accepts_valid_config():
         {"MAX_FILE_SIZE_MB": 0},
         {"MAX_CHUNK_SIZE_MB": 32},
         {"MAX_IMAGE_DIMENSIONS": (0, 100)},
+        {"MAX_IMAGE_DIMENSIONS": (100, "large")},
         {"MODEL_INPUT_SHAPE": (1, 3, 0, 224)},
+        {"MODEL_INPUT_SHAPE": (None, 3, "wide", 224)},
         {"TOP_K_PREDICTIONS": 0, "MAX_TOP_K_PREDICTIONS": 10},
         {"TOP_K_PREDICTIONS": 11, "MAX_TOP_K_PREDICTIONS": 10},
         {"MAX_TOP_K_PREDICTIONS": 101},
+        {"MAX_CONCURRENT_REQUESTS": 0},
         {"MAX_CONCURRENT_REQUESTS": 512},
+        {"MAX_BATCH_SIZE": 0},
         {"MAX_BATCH_SIZE": 128},
+        {"BATCHING_TIMEOUT_MS": 0},
         {"BATCHING_TIMEOUT_MS": 10},
         {"API_RETRY": 0},
+        {"API_RETRY": 61},
+        {"INFERENCE_TIMEOUT": 0},
+        {"INFERENCE_TIMEOUT": 601},
     ],
 )
 def test_validate_rejects_invalid_configurations(kwargs):
-    """Ensure Config.validate raises ValueError for invalid configurations."""
+    """Config.validate should raise for any invalid config, whether the
+    problem is a wrong type or an out-of-range value."""
     config = make_config(**kwargs)
-
-    with pytest.raises(ValueError):
+    with pytest.raises((TypeError, ValueError)):
         Config.validate(config)
