@@ -536,11 +536,15 @@ def test_cleanup_model_is_idempotent_when_not_loaded(monkeypatch):
 def test_cleanup_model_deletes_loaded_state(monkeypatch):
     collected = []
     monkeypatch.setattr("src.model_manager.gc.collect", lambda: collected.append(True))
+    monkeypatch.setattr("src.model_manager.torch.cuda.synchronize", lambda: None)
+    monkeypatch.setattr("src.model_manager.torch.cuda.empty_cache", lambda: None)
     manager = TorchModelManager(device="cuda")
     manager.model_loaded = True
     manager.model = FakeModel()
     manager.image_processor = FakeProcessor()
 
+    # Force CUDA device here for coverage in CPU-only systems
+    manager.device = torch.device("cuda")
     manager.cleanup_model()
 
     assert manager.model_loaded is False
@@ -690,7 +694,7 @@ def test_get_model_info():
     assert info["name"] == "microsoft/resnet-50"
 
 
-def test_cleanup_backend_fallback_works(monkeypatch):
+def test_cleanup_backend_fallback_works():
     class MockModelManager(ModelManager):
         def load_model(self):
             pass
@@ -698,8 +702,6 @@ def test_cleanup_backend_fallback_works(monkeypatch):
         def predict(self, inputs):
             return inputs
 
-    monkeypatch.setattr("src.model_manager.torch.cuda.empty_cache", lambda: None)
-    monkeypatch.setattr("src.model_manager.torch.cuda.synchronize", lambda: None)
     manager = MockModelManager()
     manager._cleanup_backend()
 
