@@ -134,7 +134,9 @@ class ModelManager(ABC):
         logger.debug("Preprocessing %d image(s)", len(inputs))
         processed_inputs: torch.Tensor = self.image_processor(
             inputs, return_tensors="pt"
-        )["pixel_values"].to(self.device)
+        )["pixel_values"]
+        if self.inference_backend == "torch":
+            processed_inputs.to(self.device)
         logger.debug("Preprocessing completed for %d image(s)", len(inputs))
         return processed_inputs
 
@@ -264,9 +266,11 @@ class ONNXModelManager(ModelManager):
     providers: onnxruntime.SessionOptions = []
     session: onnxruntime.InferenceSession | None = None
     session_path: str
+    orig_name: str
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.orig_name = self.model_name
         rstring = self.model_name.replace("/", "-")
         if rstring != self.model_name:
             logger.warning(
@@ -307,9 +311,18 @@ class ONNXModelManager(ModelManager):
     def load_model(self):
         logger.info("Loading model %s onto %s", self.model_name, self.device)
         if self.session_path and self.providers:
-            self.session = onnxruntime.InferenceSession(
-                self.session_path, self.providers
-            )
+            try:
+                self.image_processor = AutoImageProcessor.from_pretrained(
+                    self.orig_name
+                )
+                self.session = onnxruntime.InferenceSession(
+                    path_or_bytes=self.session_path, providers=self.providers
+                )
+            except Exception as e:
+                self.image_processor = None
+                self.session = None
+                logger.error(f"Model loading failed (ONNX) {e}")
+                raise FileNotFoundError("Model loading failed (ONNX)")
         else:
             raise ValueError(
                 "Model path and inference backend must be provided for ONNX/TensorRT"

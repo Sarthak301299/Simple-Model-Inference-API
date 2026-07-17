@@ -79,8 +79,8 @@ class FakeModel:
 class FakeInferenceSession:
     """Stands in for onnxruntime.InferenceSession."""
 
-    def __init__(self, path, providers=None):
-        self.path = path
+    def __init__(self, path_or_bytes, providers=None):
+        self.path = path_or_bytes
         self.providers = providers
         self.run_calls = []
 
@@ -111,7 +111,7 @@ def fake_ort(monkeypatch):
 
 
 def test_load_model_creates_session_with_configured_providers_and_wrong_name(
-    fake_ort, tmp_path
+    fake_ort, tmp_path, monkeypatch
 ):
     onnx_path = tmp_path / "microsoft-resnet-50.onnx"
     json_path = tmp_path / "microsoft-resnet-50_config.json"
@@ -119,6 +119,13 @@ def test_load_model_creates_session_with_configured_providers_and_wrong_name(
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
 
     manager = ONNXModelManager(
         model_name="microsoft/resnet-50",
@@ -139,9 +146,16 @@ def test_load_model_creates_session_with_configured_providers_and_wrong_name(
     )
 
 
-def test_load_model_raises_on_missing_json(fake_ort, tmp_path):
+def test_load_model_raises_on_missing_json(fake_ort, tmp_path, monkeypatch):
     onnx_path = tmp_path / "microsoft-resnet-50.onnx"
     onnx_path.write_bytes(b"fake onnx bytes")
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
 
     manager = ONNXModelManager(
         model_name="microsoft/resnet-50",
@@ -153,10 +167,20 @@ def test_load_model_raises_on_missing_json(fake_ort, tmp_path):
         manager.load_model()
 
 
-def test_load_model_defaults_to_cpu_provider_when_unset(fake_ort, tmp_path):
+def test_load_model_defaults_to_cpu_provider_when_unset(
+    fake_ort, tmp_path, monkeypatch
+):
     onnx_path = tmp_path / "resnet-50.onnx"
     json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
@@ -209,6 +233,39 @@ def test_load_model_raises_key_error_when_missing_id2label(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
     monkeypatch.setattr("src.model_manager.json.load", lambda input: {"0": "cat"})
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
+    manager = object.__new__(ONNXModelManager)
+    manager.model_name = "resnet-50"
+    manager.model_path = str(tmp_path)
+    manager.device = torch.device("cpu")
+    manager.inference_backend = "onnx"
+    manager.orig_name = manager.model_name
+    manager.providers = ["CPUExecutionProvider"]
+    manager.session_path = (
+        onnx_path  # pyright: ignore[reportArgumentType] # type: ignore
+    )
+
+    with pytest.raises(KeyError):
+        manager.load_model()
+
+
+def test_load_model_raises_filenotfound_error_when_loading_fails(
+    fake_ort, tmp_path, monkeypatch
+):
+    onnx_path = tmp_path / "resnet-50.onnx"
+    json_path = tmp_path / "resnet-50_config.json"
+    onnx_path.write_bytes(b"fake onnx bytes")
+    json_path.write_bytes(
+        json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
+    )
+    monkeypatch.setattr("src.model_manager.json.load", lambda input: {"0": "cat"})
     manager = object.__new__(ONNXModelManager)
     manager.model_name = "resnet-50"
     manager.model_path = str(tmp_path)
@@ -219,7 +276,7 @@ def test_load_model_raises_key_error_when_missing_id2label(
         onnx_path  # pyright: ignore[reportArgumentType] # type: ignore
     )
 
-    with pytest.raises(KeyError):
+    with pytest.raises(FileNotFoundError):
         manager.load_model()
 
 
@@ -251,6 +308,13 @@ def test_load_model_selects_cuda_provider_when_device_is_cuda(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
 
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
     manager = ONNXModelManager(
         model_name="resnet-50", device="cuda", model_path=str(tmp_path)
     )
@@ -272,6 +336,13 @@ def test_load_model_selects_tensorrt_provider_with_cache_config(
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
 
     manager = ONNXModelManager(
         model_name="resnet-50",
@@ -298,13 +369,21 @@ def test_load_model_selects_tensorrt_provider_with_cache_config(
     )
 
 
-def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path):
+def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path, monkeypatch):
     onnx_path = tmp_path / "resnet-50.onnx"
     json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 
@@ -317,7 +396,9 @@ def test_predict_returns_logits_tensor_and_latency(fake_ort, tmp_path):
     assert latency_ms >= 0.0
 
 
-def test_predict_passes_numpy_pixel_values_to_session_run(fake_ort, tmp_path):
+def test_predict_passes_numpy_pixel_values_to_session_run(
+    fake_ort, tmp_path, monkeypatch
+):
 
     onnx_path = tmp_path / "resnet-50.onnx"
     json_path = tmp_path / "resnet-50_config.json"
@@ -325,6 +406,14 @@ def test_predict_passes_numpy_pixel_values_to_session_run(fake_ort, tmp_path):
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 
@@ -352,13 +441,21 @@ def test_predict_raises_clear_error_when_model_not_loaded(fake_ort, tmp_path):
         manager.predict(torch.zeros(1, 3, 224, 224))
 
 
-def test_cleanup_resets_state(fake_ort, tmp_path):
+def test_cleanup_resets_state(fake_ort, tmp_path, monkeypatch):
     onnx_path = tmp_path / "resnet-50.onnx"
     json_path = tmp_path / "resnet-50_config.json"
     onnx_path.write_bytes(b"fake onnx bytes")
     json_path.write_bytes(
         json.dumps({"id2label": {1: "cat", 2: "dog"}}).encode("utf-8")
     )
+
+    class MockProcessorLoader:
+        @staticmethod
+        def from_pretrained(name, local_files_only=False):
+            return True
+
+    monkeypatch.setattr("src.model_manager.AutoImageProcessor", MockProcessorLoader)
+
     manager = ONNXModelManager(model_name="resnet-50", model_path=str(tmp_path))
     manager.load_model()
 

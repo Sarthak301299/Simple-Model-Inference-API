@@ -2,9 +2,9 @@ name: Inference API CI Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
@@ -16,7 +16,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v8.3.2
         with:
-          version: '0.11.28'
+          version: "0.11.28"
           enable-cache: true
       - name: Install dependencies
         run: uv sync --locked --extra cpu --dev
@@ -24,17 +24,54 @@ jobs:
         uses: psf/black@stable
         with:
           options: "--check --diff"
-          src: "src tests"
+          src: "src tests scripts"
       - name: Lint check
         uses: astral-sh/ruff-action@v4.0.0
         with:
-          src: "src tests"
+          src: "src tests scripts"
       - name: Type check
         uses: jakebailey/pyright-action@v3
       - name: Unit & Coverage Tests
         run: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80
       - name: Security Audit
         run: uv audit
+  export-onnx:
+    name: Export ONNX model
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.28"
+          enable-cache: true
+      - name: Compute cache key
+        id: cachekey
+        run: |
+          echo "key=onnx-${{ hashFiles('uv.lock') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore cached export
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .onnx_models/
+          key: ${{ steps.cachekey.outputs.key }}
+      - name: Install export dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: uv sync --extra cpu --no-dev
+      - name: Export and verify parity
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python -m scripts.export_onnx
+      - name: Upload ONNX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: onnx-model-resnet50
+          path: |
+            .onnx_models/microsoft-resnet-50.onnx
+            .onnx_models/microsoft-resnet-50_config.json
+
   build:
     name: Docker Build
     runs-on: ubuntu-latest
@@ -68,13 +105,94 @@ jobs:
           build-args: EXTRA=cpu
       - name: Verify torch is actually installed
         run: |
-            docker run --rm simple-model-inference-api:cpuci \
-            python -c "import torch; print('torch', torch.__version__, 'OK')"
+          docker run --rm simple-model-inference-api:cpuci \
+          python -c "import torch; print('torch', torch.__version__, 'OK')"
       - name: Start container for a smoke test
         run: |
-            docker run -d --name smoke-test -p 8000:8000 \
-            -e API_KEY= \
-            simple-model-inference-api:cpuci
+          docker run -d --name smoke-test -p 8000:8000 \
+          -e API_KEY= \
+          simple-model-inference-api:cpuci
+      - name: Wait for /health/live
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health/live; then
+              echo "Service is live"
+              exit 0
+            fi
+            echo "Attempt $i: not live yet, retrying..."
+            sleep 3
+          done
+          echo "Service did not become live in time"
+          docker logs smoke-test
+          exit 1
+      - name: Wait for /health/ready (model fully loaded)
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/health/ready; then
+              echo "Model loaded and ready"
+              exit 0
+            fi
+            echo "Attempt $i: not ready yet, retrying..."
+            sleep 5
+          done
+          echo "Service did not become ready in time"
+          docker logs smoke-test
+          exit 1
+      - name: Dump container logs
+        if: always()
+        run: docker logs smoke-test || true
+      - name: Stop and remove smoke test container
+        if: always()
+        run: docker rm -f smoke-test || true
+  build-onnx:
+    name: Docker Build with ONNX
+    runs-on: ubuntu-latest
+    needs: export-onnx
+    if: success()
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: Sarthak301299
+          minimum-approvals: 1
+          issue-title: "Manual Approval Required for Docker Build"
+          issue-body: "Please approve or deny the deployment."
+      - name: Check out repository code
+        uses: actions/checkout@v7
+      - name: Download ONXX model
+        uses: actions/download-artifact@v8
+        with:
+          name: onnx-model-resnet50
+          path: |
+            .onnx_models/microsoft-resnet-50.onnx
+            .onnx_models/microsoft-resnet-50_config.json
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build Docker Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: simple-model-inference-api:cpuci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: EXTRA=cpu
+      - name: Verify torch is actually installed
+        run: |
+          docker run --rm simple-model-inference-api:cpuci \
+          python -c "import torch; print('torch', torch.__version__, 'OK')"
+      - name: Start container for a smoke test
+        run: |
+          docker run -d --name smoke-test -p 8000:8000 \
+          -e API_KEY= -e INFERENCE_BACKEND=onnx \
+          -v model-cache:/home/modelapi/.cache/huggingface \
+          -v .onnx_models:/app/.onnx_models \
+          simple-model-inference-api:cpuci
       - name: Wait for /health/live
         run: |
           for i in $(seq 1 30); do

@@ -13,10 +13,11 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "python-dotenv",
-    "transformers",
+    "transformers>5",
     "pillow",
     "prometheus_client",
-    "python-multipart"
+    "python-multipart",
+    "onnxscript"
 ]
 
 [project.optional-dependencies]

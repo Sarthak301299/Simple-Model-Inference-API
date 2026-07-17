@@ -77,6 +77,7 @@ def test_from_env_parses_remaining_runtime_controls(monkeypatch):
     monkeypatch.setenv("MAX_CHUNK_SIZE_MB", "2")
     monkeypatch.setenv("BATCHING_TIMEOUT_MS", "4")
     monkeypatch.setenv("API_RETRY", "30")
+    monkeypatch.setenv("INFERENCE_TIMEOUT", "120")
 
     config = Config.from_env()
 
@@ -85,6 +86,7 @@ def test_from_env_parses_remaining_runtime_controls(monkeypatch):
     assert config.MAX_CHUNK_SIZE_MB == 2
     assert config.BATCHING_TIMEOUT_MS == 4
     assert config.API_RETRY == 30
+    assert config.INFERENCE_TIMEOUT == 120
 
 
 @pytest.mark.parametrize(
@@ -97,6 +99,7 @@ def test_from_env_parses_remaining_runtime_controls(monkeypatch):
         {"MAX_BATCH_SIZE": 64},
         {"BATCHING_TIMEOUT_MS": 5},
         {"API_RETRY": 60},
+        {"INFERENCE_TIMEOUT": 600},
     ],
 )
 def test_validate_accepts_boundary_values(kwargs):
@@ -127,10 +130,16 @@ def test_default_config_values(monkeypatch):
         "LOG_LEVEL",
         "LOG_FORMAT",
         "MAX_FILE_SIZE_MB",
+        "MAX_CHUNK_SIZE_MB",
         "MAX_IMAGE_DIMENSIONS",
         "MODEL_INPUT_SHAPE",
         "TOP_K_PREDICTIONS",
         "MAX_TOP_K_PREDICTIONS",
+        "MAX_CONCURRENT_REQUESTS",
+        "MAX_BATCH_SIZE",
+        "BATCHING_TIMEOUT_MS",
+        "API_RETRY",
+        "INFERENCE_TIMEOUT",
     ]:
         monkeypatch.delenv(env_var, raising=False)
 
@@ -148,10 +157,16 @@ def test_default_config_values(monkeypatch):
     assert config.LOG_LEVEL == "INFO"
     assert config.LOG_FORMAT == "json"
     assert config.MAX_FILE_SIZE_MB == 16
+    assert config.MAX_CHUNK_SIZE_MB == 1
     assert config.MAX_IMAGE_DIMENSIONS == (4096, 4096)
     assert config.MODEL_INPUT_SHAPE == (None, 3, 224, 224)
     assert config.TOP_K_PREDICTIONS == 5
     assert config.MAX_TOP_K_PREDICTIONS == 10
+    assert config.MAX_CONCURRENT_REQUESTS == 256
+    assert config.MAX_BATCH_SIZE == 64
+    assert config.BATCHING_TIMEOUT_MS == 3
+    assert config.API_RETRY == 5
+    assert config.INFERENCE_TIMEOUT == 60
     assert config.to_dict()["MODEL_NAME"] == config.MODEL_NAME
     assert str(config) == str(config.to_dict())
 
