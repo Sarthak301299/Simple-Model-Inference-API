@@ -55,7 +55,7 @@ jobs:
         id: cache
         uses: actions/cache@v6
         with:
-          path: .onnx_models/
+          path: onnx_models/
           key: ${{ steps.cachekey.outputs.key }}
       - name: Install export dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -65,14 +65,14 @@ jobs:
         run: |
           uv run python -m scripts.export_onnx
         env:
-          MODEL_PATH: ".onnx_models"
+          MODEL_PATH: "onnx_models"
       - name: Upload ONNX artifact
         uses: actions/upload-artifact@v7
         with:
           name: onnx-model-resnet50
           path: |
-            .onnx_models/microsoft-resnet-50.onnx
-            .onnx_models/microsoft-resnet-50_config.json
+            onnx_models/microsoft-resnet-50.onnx
+            onnx_models/microsoft-resnet-50_config.json
 
   build:
     name: Docker Build
@@ -170,8 +170,8 @@ jobs:
         with:
           name: onnx-model-resnet50
           path: |
-            .onnx_models/microsoft-resnet-50.onnx
-            .onnx_models/microsoft-resnet-50_config.json
+            onnx_models/microsoft-resnet-50.onnx
+            onnx_models/microsoft-resnet-50_config.json
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Build Docker Image
@@ -191,9 +191,9 @@ jobs:
       - name: Start container for a smoke test
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
-          -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=.onnx_models \
+          -e API_KEY= -e INFERENCE_BACKEND=onnx -e MODEL_PATH=onnx_models \
           -v model-cache:/home/modelapi/.cache/huggingface \
-          -v .onnx_models:/app/.onnx_models \
+          -v onnx_models:/app/onnx_models \
           simple-model-inference-api:cpuci
       - name: Wait for /health/live
         run: |
