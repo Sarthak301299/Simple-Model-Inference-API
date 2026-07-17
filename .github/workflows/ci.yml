@@ -180,7 +180,7 @@ jobs:
           docker stop smoke-test
       - name: Start container for a smoke test (ONNX)
         run: |
-          docker run -d --name smoke-test -p 8000:8000 \
+          docker run -d --name smoke-test-onnx -p 8000:8000 \
           -e API_KEY= -e INFERENCE_BACKEND=onnx \
           -e MODEL_PATH=/app/onnx_models -e INFERENCE_DEVICE=cpu \
           -e API_HOST=0.0.0.0 -e API_PORT=8000 -e HF_HOME=/app/huggingface \
@@ -215,7 +215,11 @@ jobs:
           exit 1
       - name: Dump container logs
         if: always()
-        run: docker logs smoke-test || true
+        run: |
+          docker logs smoke-test || true
+          docker logs smoke-test-onnx || true
       - name: Stop and remove smoke test container
         if: always()
-        run: docker rm -f smoke-test || true
+        run: |
+          docker rm -f smoke-test || true
+          docker rm -f smoke-test-onnx || true
