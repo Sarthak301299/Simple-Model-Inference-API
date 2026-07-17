@@ -1,8 +1,17 @@
 version: '3.8'
 
 services:
+  init-volume:
+    image: alpine
+    volumes:
+      - model-cache:/home/modelapi/.cache/huggingface
+      - onnx_models:/app/onnx_models
+    command: sh -c "chown -R modelapi:modelapi /home/modelapi/.cache/huggingface /app/onnx_models"
   model-api:
     image: simple-model-inference-api:cpu
+    depends_on:
+      init-volume:
+        condition: service_completed_successfully
     build:
       context: ..
       dockerfile: docker/Dockerfile

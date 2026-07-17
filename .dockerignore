@@ -30,6 +30,7 @@ data/
 tests/load/data
 tests/load/*.csv
 .onnx_models
+onnx_models
 .tensorrtcache
 
 # Virtual environments
