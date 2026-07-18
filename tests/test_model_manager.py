@@ -356,7 +356,7 @@ def test_load_model_selects_tensorrt_provider_with_cache_config(
             "TensorrtExecutionProvider",
             {
                 "trt_engine_cache_enable": True,
-                "trt_engine_cache_path": ".tensorrtcache/",
+                "trt_engine_cache_path": "onnx_models/tensorrtcache/",
             },
         ),
         "CUDAExecutionProvider",

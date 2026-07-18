@@ -26,14 +26,16 @@ gpu = [
     "torch",
     "torchvision",
     "torchaudio",
-    "onnxruntime-gpu"
+    "onnxruntime-gpu<1.27.0",
+    "tensorrt<=10.7",
+    "tensorrt-cu12-libs<11"
 ]
 # Installs standard PyPI wheels (usually CPU or default fallback)
 cpu = [
     "torch",
     "torchvision",
     "torchaudio",
-    "onnxruntime"
+    "onnxruntime<1.27.0"
 ]
 
 [tool.uv]

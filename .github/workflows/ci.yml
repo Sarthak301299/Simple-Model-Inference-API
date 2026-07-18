@@ -139,16 +139,12 @@ jobs:
         run: |
           docker run --rm simple-model-inference-api:cpuci \
           python -c "import torch; print('torch', torch.__version__, 'OK')"
-      - name: Prepare writable host cache directory
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/model-cache"
-          chmod -R 777 "$GITHUB_WORKSPACE/model-cache"
       - name: Start container for a smoke test (Torch)
         run: |
           docker run -d --name smoke-test -p 8000:8000 \
           -e API_KEY= -e INFERENCE_BACKEND=torch -e INFERENCE_DEVICE=cpu \
-          -e API_HOST=0.0.0.0 -e API_PORT=8000 -e HF_HOME=/app/huggingface \
-          -v $GITHUB_WORKSPACE/model-cache:/app/huggingface \
+          -e API_HOST=0.0.0.0 -e API_PORT=8000 -e HF_HOME=/home/modelapi/.cache/huggingface \
+          -v $GITHUB_WORKSPACE/model-cache:/home/modelapi/.cache/huggingface \
           simple-model-inference-api:cpuci
       - name: Wait for /health/live
         run: |
@@ -184,8 +180,8 @@ jobs:
           docker run -d --name smoke-test-onnx -p 8000:8000 \
           -e API_KEY= -e INFERENCE_BACKEND=onnx \
           -e MODEL_PATH=/app/onnx_models -e INFERENCE_DEVICE=cpu \
-          -e API_HOST=0.0.0.0 -e API_PORT=8000 -e HF_HOME=/app/huggingface \
-          -v $GITHUB_WORKSPACE/model-cache:/app/huggingface \
+          -e API_HOST=0.0.0.0 -e API_PORT=8000 -e HF_HOME=/home/modelapi/.cache/huggingface \
+          -v $GITHUB_WORKSPACE/model-cache:/home/modelapi/.cache/huggingface \
           -v $GITHUB_WORKSPACE/onnx_models:/app/onnx_models \
           simple-model-inference-api:cpuci
       - name: Wait for /health/live

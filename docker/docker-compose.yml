@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   model-api:
     image: simple-model-inference-api:cpu
@@ -20,17 +18,17 @@ services:
       # container unreachable despite the published port mapping.
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - HF_HOME=/app/huggingface
+      - HF_HOME=/home/modelapi/.cache/huggingface
       # Fixed to match this image's installed dependencies: The CPU image has
       # no CUDA-enabled torch wheels, so this must stay "cpu" regardless of .env.
       # docker-compose.gpu.yml overrides this to "cuda" for the GPU image, which does
       # have CUDA wheels installed.
       - INFERENCE_DEVICE=cpu
+      - INFERENCE_BACKEND=onnx
       # Everything else (MODEL_NAME, MAX_BATCH_SIZE, API_KEY, ...) comes from
       # ../.env via env_file — add/change values there, no edits needed here.
     volumes:
-      - model-cache:/app/huggingface
-      - onnx_models:/app/onnx_models
+      - ${PWD}/onnx_models:/app/onnx_models
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health/live', timeout=5).raise_for_status()"]
@@ -40,5 +38,4 @@ services:
       start_period: 40s
 
 volumes:
-  model-cache:
-  onnx-models:
+  onnx_models:

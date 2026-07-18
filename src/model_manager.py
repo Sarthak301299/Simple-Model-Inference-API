@@ -136,7 +136,7 @@ class ModelManager(ABC):
             inputs, return_tensors="pt"
         )["pixel_values"]
         if self.inference_backend == "torch":
-            processed_inputs.to(self.device)
+            processed_inputs = processed_inputs.to(self.device)
         logger.debug("Preprocessing completed for %d image(s)", len(inputs))
         return processed_inputs
 
@@ -298,7 +298,7 @@ class ONNXModelManager(ModelManager):
                     "TensorrtExecutionProvider",
                     {
                         "trt_engine_cache_enable": True,
-                        "trt_engine_cache_path": ".tensorrtcache/",
+                        "trt_engine_cache_path": "onnx_models/tensorrtcache/",
                     },
                 ),
                 "CUDAExecutionProvider",

@@ -49,7 +49,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Copy only the compiled virtual environment from the builder stage
 # Both stages must use identical Python base images so the binary paths match
-COPY --from=builder --chown=modelapi:modelapi /app/.venv /app/.venv
 COPY --from=builder --chown=modelapi:modelapi /app /app
 
 # Switch to the non-root user for execution

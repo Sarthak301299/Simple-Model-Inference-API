@@ -38,9 +38,9 @@ env/
 # Data files
 data/
 tests/load/data
-tests/load/*.csv
 .onnx_models
 onnx_models
+model-cache/
 .tensorrtcache
 
 # IDE

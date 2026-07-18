@@ -28,7 +28,7 @@ htmlcov/
 # Data files
 data/
 tests/load/data
-tests/load/*.csv
+*.csv
 .onnx_models
 onnx_models
 .tensorrtcache

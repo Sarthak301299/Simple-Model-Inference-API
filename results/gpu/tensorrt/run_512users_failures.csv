@@ -1,0 +1,4 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/predict,CatchResponseError('Unexpected status for invalid image: 0: '),7,2026-07-18T12:31:42Z,2026-07-18T12:31:46Z
+POST,/predict,"CatchResponseError('Unexpected Status 504: {""detail"":""Inference timed out.""}')",29,2026-07-18T12:31:46Z,2026-07-18T12:31:48Z
+POST,/predict,CatchResponseError('Unexpected Status 0: '),7,2026-07-18T12:31:42Z,2026-07-18T12:31:46Z
