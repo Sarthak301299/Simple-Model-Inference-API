@@ -35,7 +35,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Create a secure, non-privileged system user
-RUN useradd -u 8888 -m modelapi
+RUN useradd -u 8888 -m modelapi && \
+    chown -R 8888:8888 /home/modelapi && \
+    chmod -R 777 /home/modelapi
 
 # Place the virtual environment's binaries directly onto the PATH
 ENV PYTHONUNBUFFERED=1 \
