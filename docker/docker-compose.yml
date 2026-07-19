@@ -24,7 +24,7 @@ services:
       # docker-compose.gpu.yml overrides this to "cuda" for the GPU image, which does
       # have CUDA wheels installed.
       - INFERENCE_DEVICE=cpu
-      - INFERENCE_BACKEND=tensorrt
+      - INFERENCE_BACKEND=onnx
       # Everything else (MODEL_NAME, MAX_BATCH_SIZE, API_KEY, ...) comes from
       # ../.env via env_file — add/change values there, no edits needed here.
     volumes:

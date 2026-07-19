@@ -100,11 +100,18 @@ exclude = '''
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+omit = ["scripts/plot_load_results.py"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
 
 [dependency-groups]
+analysis = [
+    "matplotlib>=3.11.1",
+    "pandas>=3.0.3",
+]
 dev = [
     "pytest",
     "pytest-cov",
