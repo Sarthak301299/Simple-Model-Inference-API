@@ -15,7 +15,7 @@ A lightweight, scalable REST API for image classification that uses pre-trained 
 - **GPU Support**: Automatic GPU detection with CUDA support or CPU fallback
 - **Configuration Management**: Environment-based configuration for flexible deployments
 - **Production Ready**: Includes Docker containerization, health checks, and comprehensive logging
-- **Comprehensive Testing**: High test coverage with pytest
+- **Comprehensive Testing**: Full test coverage with pytest
 - **Non-root Container**: Runs as non-privileged user for enhanced security
 
 ## Architecture
