@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/predict,"CatchResponseError('Unexpected Status 504: {""detail"":""Inference timed out.""}')",88,2026-07-18T17:23:21Z,2026-07-18T17:23:28Z

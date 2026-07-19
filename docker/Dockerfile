@@ -36,6 +36,7 @@ WORKDIR /app
 
 # Create a secure, non-privileged system user
 RUN useradd -u 8888 -m modelapi && \
+    mkdir -p /home/modelapi/.cache/huggingface/hub && \
     chown -R 8888:8888 /home/modelapi && \
     chmod -R 777 /home/modelapi
 
