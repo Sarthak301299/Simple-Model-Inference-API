@@ -106,6 +106,7 @@ omit = ["scripts/plot_load_results.py"]
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+ignore=["scripts/plot_load_results.py"]
 
 [dependency-groups]
 analysis = [
