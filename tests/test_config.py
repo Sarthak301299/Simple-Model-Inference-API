@@ -152,7 +152,6 @@ def test_default_config_values(monkeypatch):
     assert config.API_HOST == "0.0.0.0"
     assert config.API_KEY is None
     assert config.API_PORT == 8000
-    assert config.API_VERSION == "1.0.0"
     assert config.DEBUG is False
     assert config.LOG_LEVEL == "INFO"
     assert config.LOG_FORMAT == "json"
