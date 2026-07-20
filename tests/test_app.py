@@ -271,7 +271,9 @@ def test_predict_returns_prediction_payload():
     app_module.app.state.inf_engine = SimpleNamespace(
         ready=True, inference_queue=queue.Queue(), EnqueueRequest=enqueue
     )
-    request = Request(scope={"type": "http", "headers": []})
+    request = Request(
+        scope={"type": "http", "headers": [(b"content-length", "64".encode("utf-8"))]}
+    )
     file = UploadFile(
         filename="x.png",
         file=make_png(),

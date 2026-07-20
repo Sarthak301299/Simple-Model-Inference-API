@@ -24,7 +24,7 @@ repos:
         pass_filenames: false
       - id: Testing and Coverage
         name: Run pytest to use tests and generate coverage report
-        entry: uv run pytest --cov=src --cov=scripts --cov-report=term-missing --cov-fail-under=80
+        entry: uv run pytest --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=80
         language: system
         types: [python]
         pass_filenames: false

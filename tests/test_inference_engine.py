@@ -263,6 +263,21 @@ def test_perform_inference_fails_valid_futures_when_batch_stage_fails(failure_at
         close_future_loop(loop)
 
 
+def test_batch_processing_loops_exits_on_shutdown():
+    engine = make_engine(
+        SimpleNamespace(
+            TOP_K_PREDICTIONS=1,
+            MAX_IMAGE_DIMENSIONS=(10, 10),
+            MAX_BATCH_SIZE=2,
+            BATCHING_TIMEOUT_MS=1,
+            validate_image=lambda image, max_dims: True,
+        )
+    )
+    engine.shutdown_event.set()
+    engine.batch_processing_loop()
+    assert engine.shutdown_event.is_set()
+
+
 def test_batch_processing_loop_processes_partial_batch_and_preserves_order():
     engine = make_engine(
         SimpleNamespace(

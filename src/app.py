@@ -63,8 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.inf_engine = InferenceEngine(app.state.config)
     yield
     # Stop the inference engine and clean up the model on shutdown.
-    if hasattr(app.state, "inf_engine"):
-        app.state.inf_engine.shutdown()
+    app.state.inf_engine.shutdown()
 
 
 app = FastAPI(

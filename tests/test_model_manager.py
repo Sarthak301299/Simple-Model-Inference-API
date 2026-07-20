@@ -531,6 +531,20 @@ def test_preprocess_inputs_accepts_list_and_preserves_batch_size():
     assert manager.image_processor.called_with == images
 
 
+def test_preprocess_inputs_accepts_list_and_preserves_batch_size_onnx_move_skip():
+    manager = TorchModelManager(device="cpu")
+    manager.model_loaded = True
+    manager.model = FakeModel()
+    manager.image_processor = FakeProcessor()
+    images = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2))]
+
+    manager.inference_backend = "onnx"
+    tensor = manager.preprocess_inputs(images)
+
+    assert tensor.shape[0] == 2
+    assert manager.image_processor.called_with == images
+
+
 def test_preprocess_inputs_rejects_empty_list():
     manager = TorchModelManager(device="cpu")
     manager.model_loaded = True
@@ -630,7 +644,8 @@ def test_cleanup_model_is_idempotent_when_not_loaded(monkeypatch):
     assert manager.model_loaded is False
 
 
-def test_cleanup_model_deletes_loaded_state(monkeypatch):
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+def test_cleanup_model_deletes_loaded_state(device, monkeypatch):
     collected = []
     monkeypatch.setattr("src.model_manager.gc.collect", lambda: collected.append(True))
     monkeypatch.setattr("src.model_manager.torch.cuda.synchronize", lambda: None)
@@ -641,7 +656,7 @@ def test_cleanup_model_deletes_loaded_state(monkeypatch):
     manager.image_processor = FakeProcessor()
 
     # Force CUDA device here for coverage in CPU-only systems
-    manager.device = torch.device("cuda")
+    manager.device = torch.device(device)
     manager.cleanup_model()
 
     assert manager.model_loaded is False
