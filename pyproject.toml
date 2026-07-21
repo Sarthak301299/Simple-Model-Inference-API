@@ -1,6 +1,6 @@
 [project]
 name = "simple-model-inference-api"
-version = "0.1.0"
+version = "1.0.2"
 description = "A simple REST API for model inference using environment-based configuration."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -37,6 +37,11 @@ cpu = [
     "torchaudio",
     "onnxruntime<1.27.0"
 ]
+# Installs AWS Dependencies
+aws = [
+    "sagemaker>=3.2",
+    "boto3"
+]
 
 [tool.uv]
 # Tells uv that a user cannot install both extras at the same time
@@ -45,6 +50,10 @@ conflicts = [
     [
         { extra = "cpu" },
         { extra = "gpu" }
+    ],
+    [
+        { extra = "aws" },
+        { group = "analysis" }
     ]
 ]
 

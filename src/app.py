@@ -102,6 +102,15 @@ async def metrics() -> Response:
 
 
 @app.get("/health/live", status_code=status.HTTP_200_OK)
+async def live_endpoint() -> JSONResponse:
+    return await liveness_check()
+
+
+@app.get("/ping", status_code=status.HTTP_200_OK)
+async def ping_endpoint() -> JSONResponse:
+    return await liveness_check()
+
+
 async def liveness_check() -> JSONResponse:
     """Return a response to confirm the service is alive."""
 
@@ -206,6 +215,21 @@ async def info() -> JSONResponse:
 
 
 @app.post("/predict", dependencies=[Depends(verify_api_key)])
+async def predict_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+) -> Dict[str, List[Tuple[str, float]] | float]:
+    return await handle_predict_request(request, file=file)
+
+
+@app.post("/invocations", dependencies=[Depends(verify_api_key)])
+async def invocations_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+) -> Dict[str, List[Tuple[str, float]] | float]:
+    return await handle_predict_request(request, file=file)
+
+
 async def handle_predict_request(
     request: Request,
     file: UploadFile = File(...),

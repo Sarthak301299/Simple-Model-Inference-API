@@ -21,7 +21,7 @@ class Config:
     API_HOST: str = "0.0.0.0"
     API_KEY: Optional[str] = None
     API_PORT: int = 8000
-    API_VERSION: str = "1.0.1"
+    API_VERSION: str = "1.0.2"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

@@ -77,9 +77,9 @@ def test_verify_api_key_accepts_matching_key():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "engine,shutdown,expected_status",
+    "engine,shutdown,expected_status,endpoint",
     [
-        (None, False, 500),
+        (None, False, 500, app_module.live_endpoint),
         (
             SimpleNamespace(
                 inference_thread=SimpleNamespace(is_alive=lambda: False),
@@ -87,6 +87,7 @@ def test_verify_api_key_accepts_matching_key():
             ),
             False,
             500,
+            app_module.ping_endpoint,
         ),
         (
             SimpleNamespace(
@@ -95,6 +96,7 @@ def test_verify_api_key_accepts_matching_key():
             ),
             True,
             500,
+            app_module.live_endpoint,
         ),
         (
             SimpleNamespace(
@@ -103,15 +105,16 @@ def test_verify_api_key_accepts_matching_key():
             ),
             False,
             200,
+            app_module.ping_endpoint,
         ),
     ],
 )
-async def test_liveness_states(engine, shutdown, expected_status):
+async def test_liveness_states(engine, shutdown, expected_status, endpoint):
     app_module.app.state.inf_engine = engine
     if app_module.app.state.inf_engine:
         if shutdown:
             app_module.app.state.inf_engine.shutdown_event.set()
-    response = await app_module.liveness_check()
+    response = await endpoint()
 
     assert response.status_code == expected_status
 
@@ -492,7 +495,7 @@ async def test_predict_succeeds_within_timeout():
         headers=Headers({"content-type": "image/png"}),
     )
 
-    result = await app_module.handle_predict_request(request, file)
+    result = await app_module.predict_endpoint(request, file)
 
     assert result == {"prediction": [("label", 0.9)], "inference_time_ms": 12.5}
 
@@ -520,6 +523,6 @@ async def test_predict_raises_504_when_enqueue_future_never_resolves():
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await app_module.handle_predict_request(request, file)
+        await app_module.invocations_endpoint(request, file)
 
     assert exc_info.value.status_code == 504
