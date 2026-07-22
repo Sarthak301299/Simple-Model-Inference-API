@@ -183,7 +183,6 @@ All configuration is via environment variables (or a `.env` file — see `.env.t
 | `API_HOST` | `0.0.0.0` | Bind address |
 | `API_KEY` | `None` | If set, required via `X-API-Key` header on `/predict` and `/info` |
 | `API_PORT` | `8000` | Bind port |
-| `API_VERSION` | `1.0.0` | Reported in FastAPI's OpenAPI schema |
 | `DEBUG` | `false` | Debug logging |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
 | `LOG_FORMAT` | `json` | `json` or `text` |
@@ -284,6 +283,38 @@ Dashboard panels: Total request Rate, request rate by status code, request/infer
 
 **Health check**: Container-level `HEALTHCHECK` polls `/health/live` (30s interval, 10s timeout, 40s start grace period, 3 retries) — reflects process liveness, not model-readiness; use `/health/ready` for a stronger signal if you're wiring up your own orchestrator probes.
 
+## AWS Deployment
+
+The docker image is compatible with the Build Your Own Container (BYOC) format and is deployable on AWS Sagemaker. Due to dependencies, sagemaker is assigned its own dependency group. The user needs to have appropriate AWS permissions to utilize Sagemaker. Here AmazonSageMakerFullAccess was used. Steps to deploy:
+
+Create an S3 repository for holding ONNX models. Export the ONNX models and configurations generated via `scripts/export_onnx.py` to the S3 repo after packaging them into a tarball named `model.tar.gz`:
+```bash
+tar -czvf onnx_models/model.tar.gz \
+          onnx_models/microsoft-resnet-50_config.json \
+          onnx_models/microsoft-resnet-50.onnx \
+          onnx_models/microsoft-resnet-50.onnx.data
+aws s3 cp onnx_models/model.tar.gz s3://inference-sagemaker-bucket/onnx_models/model.tar.gz 
+```
+
+Create an ECR repository for holding the docker image. Build the docker image using Dockerfile.sagemaker and push it:
+```bash
+aws ecr create-repository --repository-name inference-sagemaker
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+       --output type=image,oci-mediatypes=false -f docker/Dockerfile.sagemaker \
+       --build-arg EXTRA=cpu -t simple-model-inference-api:aws-cpu .
+docker tag simple-model-inference-api:aws-cpu <aws_id>.dkr.ecr.<aws_region>.amazonaws.com/inference-sagemaker:aws-cpu
+aws ecr get-login-password --region <aws_region> | docker login --username AWS --password-stdin <aws_id>.dkr.ecr.<aws_region>.amazonaws.com 
+docker push <aws_id>.dkr.ecr.<aws_region>.amazonaws.com/inference-sagemaker:aws-cpu
+```
+
+Create .env.aws based on .env.aws.template and ensure all fields are filled with valid values. Switch to the sagemaker installation:
+```bash
+uv sync --extra aws
+```
+
+Deploy, test and delete the AWS endpoint with `scripts/aws_deploy.py`:
+![Grafana dashboard](results/monitoring/AWS-Output.png)
+
 ## Project structure
 
 ```
@@ -297,6 +328,7 @@ Dashboard panels: Total request Rate, request rate by status code, request/infer
 │   └── model_manager.py          # ModelManager ABC + Torch/ONNX backend implementations
 ├── scripts/
 │   ├── export_onnx.py            # Export + parity-check a model to ONNX
+|   ├── aws_deploy.py             # Deploy docker image in AWS and test prediction
 │   └── plot_load_results.py      # Parse Locust CSVs into comparison graphs
 ├── tests/
 │   ├── load/

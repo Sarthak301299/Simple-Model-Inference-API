@@ -22,6 +22,8 @@ import hmac
 import time
 import asyncio
 import uvicorn
+import tomllib
+from pathlib import Path
 from src.config import Config
 from src.inference_engine import InferenceEngine
 from collections.abc import AsyncGenerator
@@ -38,6 +40,25 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def get_version_from_toml() -> str:
+    path = Path("pyproject.toml")
+    if not path.exists():
+        return "Unknown"
+
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+
+    # Check standard PEP 621 [project] table first
+    if "project" in data and "version" in data["project"]:
+        return data["project"]["version"]
+
+    # Fallback to Poetry [tool.poetry] table
+    if "tool" in data and "poetry" in data.get("tool", {}):
+        return data["tool"]["poetry"].get("version", "Unknown")
+
+    return "Unknown"
 
 
 async def read_with_limits(file: UploadFile, max_bytes: int) -> bytes:
@@ -72,7 +93,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.config = Config.from_env()
-app.version = app.state.config.API_VERSION
+app.version = get_version_from_toml()
 
 REGISTRY.register(QueueDepthCollector(lambda: getattr(app.state, "inf_engine", None)))
 
@@ -106,9 +127,14 @@ async def live_endpoint() -> JSONResponse:
     return await liveness_check()
 
 
+@app.get("/health/ready")
+async def ready_endpoint() -> JSONResponse:
+    return await readyness_check()
+
+
 @app.get("/ping", status_code=status.HTTP_200_OK)
 async def ping_endpoint() -> JSONResponse:
-    return await liveness_check()
+    return await readyness_check()
 
 
 async def liveness_check() -> JSONResponse:
@@ -137,7 +163,6 @@ async def liveness_check() -> JSONResponse:
     )
 
 
-@app.get("/health/ready")
 async def readyness_check() -> JSONResponse:
     """Report whether the application is ready to accept inference requests."""
 
@@ -192,7 +217,7 @@ async def startup_check() -> JSONResponse:
 
 async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
     expected = app.state.config.API_KEY
-    if expected is None:
+    if expected is None or expected == "":
         return
     if x_api_key is None or not hmac.compare_digest(x_api_key, expected):
         raise HTTPException(

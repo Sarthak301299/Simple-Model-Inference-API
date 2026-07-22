@@ -1,6 +1,7 @@
 # dotenv environment variables
 .env
 .env.local
+.env.aws
 
 # Python cache files
 __pycache__/

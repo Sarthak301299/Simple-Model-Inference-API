@@ -87,7 +87,7 @@ def test_verify_api_key_accepts_matching_key():
             ),
             False,
             500,
-            app_module.ping_endpoint,
+            app_module.live_endpoint,
         ),
         (
             SimpleNamespace(
@@ -105,7 +105,7 @@ def test_verify_api_key_accepts_matching_key():
             ),
             False,
             200,
-            app_module.ping_endpoint,
+            app_module.live_endpoint,
         ),
     ],
 )
@@ -123,10 +123,10 @@ async def test_liveness_states(engine, shutdown, expected_status, endpoint):
 @pytest.mark.parametrize(
     "check_fn, engine, shutdown, queuefull, expected_status",
     [
-        (app_module.readyness_check, None, False, False, 503),
+        (app_module.ready_endpoint, None, False, False, 503),
         (app_module.startup_check, None, False, False, 503),
         (
-            app_module.readyness_check,
+            app_module.ping_endpoint,
             make_health_engine(ready=False),
             False,
             False,
@@ -134,7 +134,7 @@ async def test_liveness_states(engine, shutdown, expected_status, endpoint):
         ),
         (app_module.startup_check, make_health_engine(ready=False), False, False, 503),
         (
-            app_module.readyness_check,
+            app_module.ready_endpoint,
             make_health_engine(model_loaded=False),
             False,
             False,
@@ -148,7 +148,7 @@ async def test_liveness_states(engine, shutdown, expected_status, endpoint):
             503,
         ),
         (
-            app_module.readyness_check,
+            app_module.ping_endpoint,
             make_health_engine(thread_alive=False),
             False,
             False,
@@ -161,12 +161,12 @@ async def test_liveness_states(engine, shutdown, expected_status, endpoint):
             False,
             503,
         ),
-        (app_module.readyness_check, make_health_engine(), True, False, 503),
+        (app_module.ready_endpoint, make_health_engine(), True, False, 503),
         (app_module.startup_check, make_health_engine(), True, False, 503),
-        (app_module.readyness_check, make_health_engine(), False, False, 200),
+        (app_module.ping_endpoint, make_health_engine(), False, False, 200),
         (app_module.startup_check, make_health_engine(), False, False, 200),
         (
-            app_module.readyness_check,
+            app_module.ready_endpoint,
             make_health_engine(),
             False,
             True,
@@ -526,3 +526,57 @@ async def test_predict_raises_504_when_enqueue_future_never_resolves():
         await app_module.invocations_endpoint(request, file)
 
     assert exc_info.value.status_code == 504
+
+
+def test_missing_file_returns_unknown(monkeypatch, tmp_path):
+    """Should return 'Unknown' if pyproject.toml does not exist."""
+    # Force the function to look inside an empty temporary directory
+    monkeypatch.chdir(tmp_path)
+    assert app_module.get_version_from_toml() == "Unknown"
+
+
+def test_standard_pep621_project_version(monkeypatch, tmp_path):
+    """Should extract version from standard [project] table."""
+    toml_file = tmp_path / "pyproject.toml"
+    toml_file.write_text(
+        """
+    [project]
+    name = "my_app"
+    version = "1.2.3"
+    """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    assert app_module.get_version_from_toml() == "1.2.3"
+
+
+def test_poetry_legacy_version(monkeypatch, tmp_path):
+    """Should extract version from legacy [tool.poetry] table if [project] is missing."""
+    toml_file = tmp_path / "pyproject.toml"
+    toml_file.write_text(
+        """
+    [tool.poetry]
+    name = "my_app"
+    version = "2.0.0-beta.1"
+    """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    assert app_module.get_version_from_toml() == "2.0.0-beta.1"
+
+
+def test_missing_version_fields_returns_unknown(monkeypatch, tmp_path):
+    """Should return 'Unknown' if the file exists but contains no version keys."""
+    toml_file = tmp_path / "pyproject.toml"
+    toml_file.write_text(
+        """
+    [tool.some_other_tool]
+    setting = true
+    """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    assert app_module.get_version_from_toml() == "Unknown"

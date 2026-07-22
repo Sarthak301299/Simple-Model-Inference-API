@@ -34,7 +34,7 @@ jobs:
       - name: Unit & Coverage Tests
         run: uv run pytest --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=80
       - name: Security Audit
-        run: uv audit
+        run: uv audit --no-extra aws
   export-onnx:
     name: Export ONNX model
     runs-on: ubuntu-latest

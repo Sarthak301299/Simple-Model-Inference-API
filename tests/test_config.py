@@ -13,7 +13,6 @@ def make_config(**overrides):
         "API_HOST": "127.0.0.1",
         "API_KEY": None,
         "API_PORT": 8000,
-        "API_VERSION": "1.0.0",
         "DEBUG": False,
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "json",
@@ -125,7 +124,6 @@ def test_default_config_values(monkeypatch):
         "API_HOST",
         "API_KEY",
         "API_PORT",
-        "API_VERSION",
         "DEBUG",
         "LOG_LEVEL",
         "LOG_FORMAT",
@@ -181,7 +179,6 @@ def test_env_overrides_and_parsing(monkeypatch):
         "API_HOST": "127.0.0.1",
         "API_KEY": "secret",
         "API_PORT": "12345",
-        "API_VERSION": "2.0.0",
         "DEBUG": "True",
         "LOG_LEVEL": "DEBUG",
         "LOG_FORMAT": "text",
@@ -206,7 +203,6 @@ def test_env_overrides_and_parsing(monkeypatch):
     assert config.API_HOST == env["API_HOST"]
     assert config.API_KEY == env["API_KEY"]
     assert config.API_PORT == 12345
-    assert config.API_VERSION == env["API_VERSION"]
     assert config.DEBUG is True
     assert config.LOG_LEVEL == env["LOG_LEVEL"]
     assert config.LOG_FORMAT == env["LOG_FORMAT"]

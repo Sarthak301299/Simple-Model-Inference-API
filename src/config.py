@@ -21,7 +21,6 @@ class Config:
     API_HOST: str = "0.0.0.0"
     API_KEY: Optional[str] = None
     API_PORT: int = 8000
-    API_VERSION: str = "1.0.2"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
@@ -50,7 +49,6 @@ class Config:
         api_host = os.getenv("API_HOST", cls.API_HOST)
         api_key = os.getenv("API_KEY", cls.API_KEY)
         api_port = int(os.getenv("API_PORT", cls.API_PORT))
-        api_version = os.getenv("API_VERSION", cls.API_VERSION)
         debug = os.getenv("DEBUG", str(cls.DEBUG)).lower() in ("true", "1", "yes")
         log_level = os.getenv("LOG_LEVEL", cls.LOG_LEVEL)
         log_format = os.getenv("LOG_FORMAT", cls.LOG_FORMAT)
@@ -102,7 +100,6 @@ class Config:
             API_HOST=api_host,
             API_KEY=api_key,
             API_PORT=api_port,
-            API_VERSION=api_version,
             DEBUG=debug,
             LOG_LEVEL=log_level,
             LOG_FORMAT=log_format,
@@ -218,7 +215,6 @@ class Config:
             "API_HOST": self.API_HOST,
             "API_KEY": self.API_KEY,
             "API_PORT": self.API_PORT,
-            "API_VERSION": self.API_VERSION,
             "DEBUG": self.DEBUG,
             "LOG_LEVEL": self.LOG_LEVEL,
             "LOG_FORMAT": self.LOG_FORMAT,

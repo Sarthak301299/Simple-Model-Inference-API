@@ -24,6 +24,8 @@ MANIFEST
 .coverage
 htmlcov/
 .ruff_cache/
+.env.aws
+.env.template
 
 # Data files
 data/
@@ -66,3 +68,5 @@ Jenkinsfile
 *.log
 *.bak
 node_modules/
+src/aws_deploy.py
+tests/*

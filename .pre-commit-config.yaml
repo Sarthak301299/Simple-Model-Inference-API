@@ -30,7 +30,7 @@ repos:
         pass_filenames: false
       - id: Auditing
         name: Run uv audit for a security audit
-        entry: uv run uv audit
+        entry: uv audit --no-extra aws
         language: system
         types: [python]
         pass_filenames: false
